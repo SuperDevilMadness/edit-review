@@ -1,0 +1,26 @@
+{
+ "fix": [
+  "Bad take",
+  "Bad cut",
+  "Cut this pause",
+  "Word cut off",
+  "Zoom on the wrong thing",
+  "Zoom not centred",
+  "Wrong sfx",
+  "Sound too loud",
+  "Wrong music",
+  "Subtitles off",
+  "Bad frame",
+  "Put this back"
+ ],
+ "idea": [
+  "Zoom here",
+  "Add a sound",
+  "Add a whoosh",
+  "Music change here",
+  "Stop the music here",
+  "Add an edit here",
+  "Run-on, no cut",
+  "B-roll here"
+ ]
+}

@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Edit Review</title>
+<!--
+  Edit Review, the standalone page: one file, no server. It plays a finished render from a link
+  (YouTube, Google Drive, a direct video address, or a file on the reviewer's computer) and saves the
+  review as a .review.json file the reviewer sends back.
+
+  A session is only an address:
+    index.html?yt=VIDEO_ID&s=NAME        YouTube (public or unlisted)
+    index.html?drive=FILE_ID&s=NAME      Google Drive file: the reviewer downloads it, then picks the file (Drive blocks playing in a page)
+    index.html?v=ENCODED_URL&s=NAME      any YouTube / Drive / direct .mp4 address, URL-encoded
+  s (the edit's name) is optional. AI.md beside this file says how to build the link for someone.
+-->
+<style>
+  :root { --bg: #0f0d14; --panel: #1a1622; --line: #2c2638; --text: #ece8f4; --dim: #9a93aa; --accent: #9d5cff; --good: #3ccf7a; --rec: #ff4d5e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .name { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  main { max-width: 1280px; margin: 0 auto; padding: 14px 16px; }
+  .stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; overflow: hidden; }
+  #player { position: absolute; inset: 0; }
+  #player video, #player iframe { display: block; width: 100%; height: 100%; border: 0; background: #000; object-fit: contain; }
+  /* YouTube: the frame is made three times as tall and centred, so the picture fills the stage and the title
+     strip and the "more videos" shelf it shows on pause sit above and below the visible part. */
+  .stage.yt #player { top: -100%; bottom: auto; height: 300%; }
+  #ink { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+  .hint { position: absolute; left: 10px; top: 8px; font-size: 12px; color: #fff; background: #0008; padding: 3px 8px; border-radius: 4px; pointer-events: none; }
+  .loading { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; text-align: center; padding: 20px; background: #000c; color: #fff; }
+  .loading a { color: var(--accent); }
+  .recbadge { position: absolute; right: 10px; top: 8px; display: none; align-items: center; gap: 6px; background: #000a; padding: 3px 9px; border-radius: 4px; font-size: 12px; }
+  .recbadge.on { display: flex; }
+  .recbadge.paused .dot { animation: none; background: #ffd43b; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--rec); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  .bar { position: relative; height: 34px; margin-top: 10px; background: var(--panel); border-radius: 6px; cursor: pointer; overflow: hidden; touch-action: none; }
+  .seg { position: absolute; top: 0; bottom: 0; border-right: 1px solid var(--line); }
+  .seg.good { background: #3ccf7a26; }
+  .seg.cur { background: #9d5cff22; }
+  .seg span { position: absolute; left: 4px; top: 2px; font-size: 10px; color: var(--dim); }
+  .mark { position: absolute; bottom: 3px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--rec); }
+  .nmark { position: absolute; top: 14px; width: 2px; height: 12px; margin-left: -1px; background: var(--accent); pointer-events: none; }
+  .quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+  .quick .lab { color: var(--dim); font-size: 11px; min-width: 34px; }
+  .quick button { font-size: 12px; padding: 3px 9px; border-radius: 12px; }
+  .quick button.fix { border-color: #ff4d5e88; } .quick button.idea { border-color: #9d5cff88; }
+  .quick .brk { flex-basis: 100%; height: 0; }
+  #drafts .dn .tag { font-size: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; color: var(--dim); margin-right: 4px; }
+  .zoomrow { display: flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 12px; }
+  .zoomrow .meta, .speed { color: var(--dim); font-size: 12px; }
+  .speed button.on { border-color: var(--accent); color: var(--accent); }
+  .tick { position: absolute; bottom: 0; height: 6px; border-left: 1px solid #ffffff40; pointer-events: none; }
+  .ticklbl { position: absolute; bottom: 6px; font-size: 9px; color: var(--dim); margin-left: 2px; pointer-events: none; }
+  .cutreg { position: absolute; top: 0; bottom: 0; background: #ff4d5e55; border-left: 2px solid var(--rec); border-right: 2px solid var(--rec); pointer-events: none; }
+  .cutreg.open { background: none; border-right: none; }
+  #drafts .dn .pv { color: var(--rec); cursor: pointer; white-space: nowrap; }
+  .head { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+  button, select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.rec { background: var(--rec); border-color: var(--rec); color: #fff; }
+  button.good { border-color: var(--good); color: var(--good); }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button:disabled { opacity: .45; cursor: default; }
+  .time { font-variant-numeric: tabular-nums; color: var(--dim); min-width: 150px; }
+  .spacer { flex: 1; }
+  .swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; padding: 0; }
+  .swatch.on { border-color: #fff; }
+  .msg { margin-top: 10px; color: var(--dim); min-height: 20px; }
+  .notebox { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  input[type=text] { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 11px; font: inherit; }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .notebox input { flex: 1; min-width: 180px; }
+  .notebox .at { align-self: center; color: var(--accent); font-variant-numeric: tabular-nums; min-width: 58px; font-size: 12px; }
+  #drafts { margin-top: 6px; }
+  #drafts .dn { display: flex; gap: 10px; align-items: baseline; padding: 4px 8px; border-radius: 4px; }
+  #drafts .dn:hover { background: #ffffff10; }
+  #drafts .dn b { color: var(--accent); cursor: pointer; font-variant-numeric: tabular-nums; min-width: 52px; }
+  #drafts .dn .x { margin-left: auto; color: var(--dim); cursor: pointer; padding: 0 6px; }
+  #drafts .bar2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+  .tx.editable { cursor: text; border-bottom: 1px dashed transparent; }
+  .tx.editable:hover { border-bottom-color: var(--dim); }
+  input.ed { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--accent); border-radius: 4px; padding: 3px 7px; font: inherit; }
+  .shortcuts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; padding: 9px 12px; background: var(--panel); border-radius: 6px; font-size: 12px; color: var(--text); }
+  .shortcuts .dimtxt { color: var(--dim); }
+  .keys { margin-top: 14px; color: var(--dim); font-size: 12px; }
+  kbd { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
+  .meta { color: var(--dim); font-size: 12px; font-weight: 400; }
+  .picker { max-width: 560px; margin: 50px auto; display: flex; flex-direction: column; gap: 10px; }
+  .picker h2 { margin: 0; font-size: 18px; }
+  .picker p { margin: 0; }
+  .picker .err { color: var(--rec); min-height: 18px; }
+  .reviews { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .reviews h2 { font-size: 14px; margin: 0 0 8px; }
+  .rv { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 9px 12px; margin-top: 6px; background: var(--panel); border-radius: 6px; }
+  .rv .ok { color: var(--good); }
+  textarea.copybox { width: 100%; min-height: 110px; margin-top: 6px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: 12px/1.4 Consolas, monospace; }
+  @media (max-width: 700px) { .time { min-width: 0; } .shortcuts { display: none; } }
+</style>
+</head>
+<body>
+<header><h1>Edit Review</h1><span class="name" id="name"></span><span class="spacer"></span><span id="status" class="name"></span>
+  <button class="small" id="copylink" style="display:none" title="Copy this page's address, to send to someone else who should review the same video">Copy review link</button></header>
+<main id="app">
+  <div class="picker" id="picker" style="display:none">
+    <h2>Review a video</h2>
+    <p class="meta">Paste the link to the video. You get a page where you type notes on exact moments, mark stretches to cut, draw on the picture and, if you like, talk through it. Nothing is uploaded: your review is saved as a file you send back.</p>
+    <input type="text" id="plink" placeholder="YouTube or Google Drive link" autocomplete="off">
+    <input type="text" id="pname" placeholder="Name of this edit (optional, e.g. my-video-v2)" autocomplete="off">
+    <div><button class="primary" id="pgo">Open the review page</button></div>
+    <div class="err meta" id="perr"></div>
+    <p class="meta">YouTube: public and unlisted videos work, private ones don't. Google Drive: you'll be asked to download the video first, because Drive doesn't let other pages play it.</p>
+    <p class="meta">Or review a video file that is on this computer: <input type="file" id="pfile" accept="video/*"></p>
+  </div>
+  <div id="review" style="display:none">
+    <div class="stage" id="stage">
+      <div id="player"></div>
+      <canvas id="ink" width="960" height="540"></canvas>
+      <div class="hint" id="hint">Draw on the picture to point at something</div>
+      <div class="recbadge" id="recbadge"><span class="dot"></span><span id="rectime">REC</span></div>
+      <div class="loading" id="loading">Loading the video…</div>
+    </div>
+    <div class="bar" id="bar"></div>
+    <div class="zoomrow"><span class="meta" id="viewlbl"></span><span class="spacer"></span>
+      <span class="meta">Timeline zoom (or scroll on the bar):</span>
+      <button class="small" id="zout" title="Zoom the timeline out (-)">&minus;</button><button class="small" id="zin" title="Zoom the timeline in (+)">+</button>
+      <button class="small" id="zfit" title="Show the whole video (0)">Whole video</button></div>
+    <div class="controls">
+      <button id="play" class="primary" title="Play / pause (Space)">Play</button>
+      <span class="time" id="time">0:00.00 / 0:00</span>
+      <label title="Volume of the video (remembered)">🔊 <input type="range" id="vol" min="0" max="1" step="0.05" value="1" style="width:100px; vertical-align:middle"></label>
+      <span class="speed" title="Playback speed">Speed <button class="small sp on" data-r="1">1x</button><button class="small sp" data-r="1.5">1.5x</button><button class="small sp" data-r="2">2x</button></span>
+      <select id="seglen" title="Segment length">
+        <option value="60">1 min segments</option><option value="90">1.5 min segments</option>
+        <option value="120" selected>2 min segments</option>
+      </select>
+      <button id="loop" title="Loop this segment (L)">Loop segment: off</button>
+      <button id="good" class="good" title="Mark this segment good (G)">Segment good ✓</button>
+      <span class="spacer"></span>
+      <span id="colors" title="Pen colour; press C to clear the drawing"></span>
+      <select id="recvol" title="How loud the video plays while you record">
+        <option value="1" selected>Video sound while recording: full</option><option value="0.5">Video sound while recording: 50%</option>
+        <option value="0.3">Video sound while recording: 30%</option><option value="0.12">Video sound while recording: 12%</option>
+        <option value="0">Video sound while recording: off</option></select>
+      <label title="Turn the video down further the moment you start talking"><input type="checkbox" id="duck"> duck when I talk</label>
+      <label title="Echo cancelling and noise removal, like a video call. Only needed on speakers; it makes your mic sound worse"><input type="checkbox" id="cleanmic"> call-style mic cleanup</label>
+      <button id="rec" class="rec" title="Record yourself talking through the video. Optional: typed notes work without it.">● Start voice review</button>
+      <button id="recpause" style="display:none" title="Pause the recording (R). Scrub or rewatch freely; nothing is recorded until you resume.">❚❚ Pause review (R)</button>
+    </div>
+    <div class="notebox">
+      <span class="at" id="noteAt">0:00.0</span>
+      <input type="text" id="noteText" placeholder="Type a note about this moment… (Enter to add; press N to jump here)" autocomplete="off">
+      <button id="noteAdd">Add note</button>
+      <button id="cutIn" title="Mark where a cut should start (I)">✂ Cut from here</button>
+      <button id="cutOut" title="Mark where the cut ends and add it as a note (O)">to here</button>
+    </div>
+    <div class="quick" id="quick"></div>
+    <div id="drafts"></div>
+    <div class="msg" id="msg"></div>
+    <div class="shortcuts">
+      <span><kbd>Space</kbd> play / pause</span><span><kbd>←</kbd> <kbd>→</kbd> back / forward 2 s</span>
+      <span><kbd>,</kbd> <kbd>.</kbd> one frame</span><span><kbd>[</kbd> <kbd>]</kbd> previous / next segment</span>
+      <span><kbd>L</kbd> loop segment</span><span><kbd>G</kbd> segment good</span>
+      <span><kbd>C</kbd> clear drawing</span><span><kbd>N</kbd> type a note</span><span><kbd>I</kbd> <kbd>O</kbd> cut from / to here</span><span><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> timeline zoom</span><span><kbd>R</kbd> pause / resume voice review</span>
+      <span class="dimtxt">Draw on the picture to point (it pauses the video).</span>
+    </div>
+    <section class="reviews">
+      <h2>Sending your review</h2>
+      <div class="meta">Saving a review downloads a <b>.review.json</b> file. Send that file to the person who gave you this link (Discord, email, anything). Nothing leaves this page by itself.</div>
+      <div style="margin-top:8px"><input type="text" id="who" placeholder="Your name (optional, saved in the file)" autocomplete="off" style="width:280px; max-width:100%"></div>
+      <div id="saved"></div>
+    </section>
+  </div>
+</main>
+<script>
+"use strict";
+const qs = new URLSearchParams(location.search);
+const $ = id => document.getElementById(id);
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const clean = s => String(s || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }, del(k) { try { localStorage.removeItem(k); } catch (e) {} } };
+const YT_ID = /^[A-Za-z0-9_-]{11}$/, DRIVE_ID = /^[A-Za-z0-9_-]{15,}$/;
+
+// A pasted link (or a bare YouTube id) -> where the video is. null = not something this page can play.
+function parseLink(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  if (YT_ID.test(s)) return { kind: "youtube", id: s };
+  let u;
+  try { u = new URL(/^https?:\/\//i.test(s) ? s : "https://" + s); } catch (e) { return null; }
+  const h = u.hostname.toLowerCase().replace(/^(www|m|music)\./, "");
+  if (h === "youtu.be") { const id = u.pathname.split("/")[1] || ""; return YT_ID.test(id) ? { kind: "youtube", id } : null; }
+  if (h === "youtube.com" || h === "youtube-nocookie.com") {
+    const m = u.pathname.match(/^\/(?:embed|shorts|live|v)\/([A-Za-z0-9_-]{11})/), id = m ? m[1] : u.searchParams.get("v") || "";
+    return YT_ID.test(id) ? { kind: "youtube", id } : null;
+  }
+  if (h === "drive.google.com" || h === "docs.google.com" || h === "drive.usercontent.google.com") {
+    const m = u.pathname.match(/\/d\/([A-Za-z0-9_-]{15,})/), id = m ? m[1] : u.searchParams.get("id") || "";
+    return DRIVE_ID.test(id) ? { kind: "drive", id } : null;
+  }
+  return h.includes(".") || h === "localhost" ? { kind: "url", url: u.href } : null;
+}
+// Google Drive refuses to hand a video to another site's page (tested 2026-11-19: a request from a page is answered
+// 403, the same address opened by hand downloads fine). So a Drive link becomes two steps: download, then pick the file.
+function driveFile(src) {
+  return new Promise(res => {
+    const box = $("loading");
+    box.style.display = "";
+    box.innerHTML = `<b>Google Drive doesn't let other pages play its videos, so this takes two steps.</b>
+      <span>1. <a href="https://drive.google.com/file/d/${encodeURIComponent(src.id)}/view" target="_blank" rel="noopener">Open the video on Google Drive</a> and press Download.</span>
+      <span>2. Pick the downloaded file: <input type="file" id="dfile" accept="video/*"></span>
+      <span class="meta" id="derr">The file stays on your computer; picking it uploads nothing.</span>`;
+    $("dfile").onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      try { res(await html5({ kind: "file", url: URL.createObjectURL(f), name: f.name })); }
+      catch (err) { $("derr").textContent = err.message; }
+    };
+  });
+}
+function sourceFromQuery() {
+  if (qs.get("yt")) return parseLink(qs.get("yt"));
+  if (qs.get("drive")) return DRIVE_ID.test(qs.get("drive")) ? { kind: "drive", id: qs.get("drive") } : parseLink(qs.get("drive"));
+  if (qs.get("v")) return parseLink(qs.get("v"));
+  return null;
+}
+function linkFor(src, name) {
+  const p = new URLSearchParams();
+  if (src.kind === "youtube") p.set("yt", src.id); else if (src.kind === "drive") p.set("drive", src.id); else p.set("v", src.url);
+  if (clean(name)) p.set("s", clean(name));
+  return location.origin + location.pathname + "?" + p.toString();
+}
+
+// ---------- players: one small interface over a <video> and YouTube's embedded player ----------
+function html5(src) {
+  const v = document.createElement("video");
+  v.preload = "metadata"; v.playsInline = true;
+  v.src = src.kind === "drive" ? `https://drive.usercontent.google.com/download?id=${encodeURIComponent(src.id)}&export=download&confirm=t` : src.url;
+  $("player").appendChild(v);
+  const api = { kind: src.kind, onstate: null, onerror: null, title: () => src.name || "",
+    time: () => v.currentTime, dur: () => v.duration, playing: () => !v.paused && !v.ended,
+    play: () => { const p = v.play(); if (p) p.catch(() => {}); }, pause: () => v.pause(), seek: t => { v.currentTime = t; },
+    rate: r => { v.playbackRate = r; }, vol: x => { v.volume = Math.max(0, Math.min(1, x)); } };
+  v.addEventListener("play", () => api.onstate && api.onstate(true));
+  v.addEventListener("pause", () => api.onstate && api.onstate(false));
+  const why = () => src.kind === "drive" ? "Google Drive would not play this file in a page."
+    : src.kind === "file" ? "This browser can't play that file. An .mp4 (H.264) works everywhere."
+    : "That address did not play as a video. It has to be a direct link to an .mp4 or .webm file (or a YouTube or Google Drive link).";
+  return new Promise((res, rej) => {
+    let ready = false;
+    v.addEventListener("loadedmetadata", () => { ready = true; res(api); }, { once: true });
+    v.addEventListener("error", () => { if (!ready) { v.remove(); rej(new Error(why())); } else if (api.onerror) api.onerror("The video stopped loading. Check the connection, then reload the page (typed notes are kept)."); });
+  });
+}
+function youtube(id) {
+  const YT_ERR = { 2: "That isn't a valid YouTube video link.", 5: "YouTube could not play this video in a page.",
+    100: "YouTube says this video doesn't exist or is private. Unlisted and public videos work; private ones don't.",
+    101: "This video's owner has turned off playing it on other sites.", 150: "This video's owner has turned off playing it on other sites.",
+    153: "YouTube refused to play because this page was opened as a file. Open the page from its web address instead." };
+  return new Promise((res, rej) => {
+    $("stage").classList.add("yt");
+    const d = document.createElement("div"); d.id = "ytdiv"; $("player").appendChild(d);
+    let p, ready = false, state = -1, rate = 1, lastCt = -1, pw = 0, hold = null, total = 0, prime = false, wasMuted = false;
+    const api = { kind: "youtube", onstate: null, onerror: null, title: () => { try { return p.getVideoData().title || ""; } catch (e) { return ""; } },
+      // YouTube reports its time a few times a second: between reports the playhead runs on the clock
+      time() {
+        const ct = p.getCurrentTime() || 0, now = performance.now();
+        if (hold) { if (Math.abs(ct - hold.t) < 0.75 || now > hold.until) hold = null; else return hold.t; }
+        if (ct !== lastCt) { lastCt = ct; pw = now; }
+        return state === 1 ? ct + Math.min(0.6, (now - pw) / 1000) * rate : ct;
+      },
+      dur: () => total, playing: () => state === 1 && !prime, pause: () => p.pauseVideo(),
+      play() { if (prime) { prime = false; if (!wasMuted) p.unMute(); } p.playVideo(); },
+      seek(t) {
+        // not started yet: a seek makes YouTube start playing. Let it, silently, and stop on the first frame
+        // (pausing straight away leaves a black picture: tested 2026-11-19)
+        if ((state === -1 || state === 5) && !prime) { prime = true; wasMuted = p.isMuted(); p.mute(); }
+        p.seekTo(t, true); hold = { t, until: performance.now() + 1500 };
+      },
+      rate(r) { rate = r; p.setPlaybackRate(r); }, vol: x => p.setVolume(Math.round(Math.max(0, Math.min(1, x)) * 100)) };
+    window.onYouTubeIframeAPIReady = () => {
+      const vars = { controls: 0, disablekb: 1, rel: 0, playsinline: 1, iv_load_policy: 3, fs: 0 };
+      if (location.protocol.startsWith("http")) vars.origin = location.origin;
+      p = new YT.Player("ytdiv", { videoId: id, width: "100%", height: "100%", playerVars: vars, events: {
+        onReady() {
+          let n = 0;
+          const wait = setInterval(() => {   // the length arrives a moment after the player
+            total = p.getDuration() || 0;
+            if (total > 0 || ++n > 100) { clearInterval(wait); if (total > 0) { ready = true; res(api); } else rej(new Error("YouTube never said how long this video is. Reload the page to try again.")); }
+          }, 100);
+        },
+        onStateChange(e) {
+          state = e.data; lastCt = -1;
+          if (prime && state === 1) { p.pauseVideo(); if (!wasMuted) p.unMute(); prime = false; return; }
+          if (state === 1 && api.onstate) api.onstate(true);
+          if ((state === 2 || state === 0) && api.onstate) api.onstate(false);
+        },
+        onError(e) { const m = YT_ERR[e.data] || `YouTube could not play this video (error ${e.data}).`; if (!ready) rej(new Error(m)); else if (api.onerror) api.onerror(m); } } });
+    };
+    const s = document.createElement("script"); s.src = "https://www.youtube.com/iframe_api";
+    s.onerror = () => rej(new Error("YouTube's player could not be loaded. It may be blocked on this network or by an extension."));
+    document.head.appendChild(s);
+  });
+}
+
+// ---------- entry ----------
+(function () {
+  const src = sourceFromQuery();
+  if (src) { start(src); return; }
+  $("picker").style.display = "";
+  if (qs.get("yt") || qs.get("drive") || qs.get("v")) $("perr").textContent = "The link in this page's address isn't a YouTube, Google Drive or video link. Paste the video's link below.";
+  if (qs.get("s")) $("pname").value = clean(qs.get("s"));
+  const go = () => {
+    const s = parseLink($("plink").value);
+    if (!s) { $("perr").textContent = "That doesn't look like a YouTube or Google Drive link. Paste the whole link, starting with https://"; return; }
+    location.href = linkFor(s, $("pname").value);
+  };
+  $("pgo").onclick = go;
+  for (const id of ["plink", "pname"]) $(id).addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  $("pfile").onchange = e => { const f = e.target.files[0]; if (f) start({ kind: "file", url: URL.createObjectURL(f), name: f.name }, $("pname").value); };
+})();
+
+async function start(src, pickedName) {
+  $("picker").style.display = "none"; $("review").style.display = "";
+  let P;
+  const slow = setTimeout(() => { $("loading").textContent = "Still loading the video…"; }, 8000);
+  try { P = src.kind === "youtube" ? await youtube(src.id) : await html5(src); }
+  catch (e) {
+    clearTimeout(slow);
+    if (src.kind === "drive") P = await driveFile(src);
+    else {
+      $("loading").innerHTML = `<b>This video can't be played here.</b><span>${esc(e.message)}</span><a href="${esc(location.pathname)}">Try another link</a>`;
+      return;
+    }
+  }
+  clearTimeout(slow); $("loading").style.display = "none";
+  const FPS = +qs.get("fps") || 30, TOTAL = P.dur();
+  const given = clean(qs.get("s") || pickedName);
+  const SESSION = given || clean(src.kind === "youtube" ? "yt-" + src.id : src.kind === "drive" ? "drive-" + src.id.slice(0, 10)
+    : (src.name || src.url.split(/[?#]/)[0].split("/").pop() || "").replace(/\.[A-Za-z0-9]+$/, "")) || "review";
+  const NAME = given || P.title() || SESSION;
+  const SRC = src.kind === "youtube" || src.kind === "drive" ? { kind: src.kind, id: src.id } : src.kind === "file" ? { kind: "file", name: src.name } : { kind: "url", url: src.url };
+  const STASH = "draft:" + SESSION;
+  $("name").textContent = NAME; document.title = "Review: " + NAME;
+  $("status").textContent = `${{ youtube: "YouTube", drive: "Google Drive", url: "video link", file: "file on this computer" }[src.kind]} · ${(TOTAL / 60).toFixed(1)} min`;
+  if (src.kind !== "file") { $("copylink").style.display = ""; $("copylink").onclick = () => copyText(location.href, "Review link copied."); }
+
+  // ---------- transport ----------
+  let T = 0, playing = false, want = false, loop = false, loopSeg = 0, segLen = 120, RATE = 1;
+  let V0 = 0, V1 = 1e9;               // the stretch of the video the timeline shows (zoom)
+  const VS = () => Math.min(V1, TOTAL) - V0;
+  const X = t => ((t - V0) / VS() * 100);
+  const good = new Set(JSON.parse(store.get("good:" + SESSION) || "[]"));
+  let cutIn = null, cutPrev = null;   // a cut range being marked; a marked cut being played across
+  const segOf = t => Math.floor(t / segLen);
+  const nseg = () => Math.ceil(TOTAL / segLen);
+  const ink = $("ink"), ictx = ink.getContext("2d");
+  function showWant() { $("play").textContent = want ? "Pause" : "Play"; }
+  function setPlaying(p) {
+    want = p; loopSeg = segOf(T);
+    if (!p) cutPrev = null;
+    if (p) { clearInk(); P.play(); } else P.pause();
+    showWant();
+    if (p && P.kind === "youtube") setTimeout(() => {   // phones: YouTube only starts from a tap on the video itself
+      if (want && !P.playing() && T < 0.05) { ink.style.pointerEvents = "none"; msg("Tap the video once to start it."); }
+    }, 2500);
+  }
+  P.onstate = p => { want = p; showWant(); if (p) ink.style.pointerEvents = ""; else cutPrev = null; };
+  P.onerror = m => msg(m);
+  function seek(t) {
+    T = Math.max(0, Math.min(TOTAL - 0.05, t)); loopSeg = segOf(T); P.seek(T); log("seek", {});
+    clearInk(); strokes.filter(s => Math.abs(s.t - T) < 0.05).forEach(paint);   // a drawing shows only on its own moment
+  }
+
+  let lastTick = 0, lastLv = -1;
+  let micAn = null, micFloor = -60, talkUntil = 0;
+  const micBuf = new Float32Array(1024);
+  function editLevel() {
+    let lv = +$("vol").value;
+    if (!rec) return lv;
+    lv *= +$("recvol").value;
+    if (micAn && $("duck").checked) {
+      micAn.getFloatTimeDomainData(micBuf);
+      let sum = 0; for (const v of micBuf) sum += v * v;
+      const db = 10 * Math.log10(sum / micBuf.length + 1e-12);
+      micFloor = db < micFloor ? db : micFloor + 0.02;        // slow-rising noise floor (includes speaker bleed)
+      if (db > Math.max(micFloor + 10, -50)) talkUntil = performance.now() + 700;
+      if (performance.now() < talkUntil) lv *= 0.25;
+    }
+    return lv;
+  }
+  function tick() {
+    lastTick = performance.now();
+    T = Math.max(0, Math.min(TOTAL, P.time()));
+    const now = P.playing();
+    if (now !== playing) { playing = now; log("transport", {}); }
+    const lv = editLevel();
+    if (Math.abs(lv - lastLv) > 0.01) { P.vol(lv); lastLv = lv; }
+    if (playing) {
+      if (loop && T >= Math.min((loopSeg + 1) * segLen, TOTAL - 0.2)) seek(loopSeg * segLen);
+      if (cutPrev) {   // previewing a marked cut: jump over it, stop 2 s after
+        if (T < cutPrev.a - 2.5 || T > cutPrev.b + 2.5) cutPrev = null;
+        else if (T >= cutPrev.a && T < cutPrev.b) { const c = cutPrev; seek(c.b); cutPrev = c; }
+        else if (T >= cutPrev.b + 2) setPlaying(false);
+      }
+    }
+    ui();
+  }
+
+  // ---------- drawing ----------
+  const COLORS = ["#ff3b4e", "#ffd43b", "#3ccf7a", "#4dabff", "#ffffff"];
+  let color = COLORS[0], stroke = null;
+  const strokes = [];
+  $("colors").innerHTML = COLORS.map((c, i) => `<button class="swatch${i ? "" : " on"}" style="background:${c}" data-c="${c}" title="Pen colour"></button>`).join(" ");
+  $("colors").onclick = e => { const c = e.target.dataset.c; if (!c) return; color = c;
+    [...$("colors").children].forEach(b => b.classList.toggle("on", b.dataset.c === c)); };
+  const pt = e => { const r = ink.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
+  function clearInk() { ictx.clearRect(0, 0, ink.width, ink.height); }
+  function paint(s) {
+    ictx.strokeStyle = s.color; ictx.lineWidth = 5; ictx.lineCap = ictx.lineJoin = "round";
+    ictx.beginPath(); s.pts.forEach(([x, y], i) => i ? ictx.lineTo(x * 960, y * 540) : ictx.moveTo(x * 960, y * 540)); ictx.stroke();
+  }
+  ink.onpointerdown = e => {
+    const moving = playing || want;
+    if (moving) setPlaying(false);
+    stroke = { t: T, w0: wall(), pts: [pt(e)], color, moving }; ink.setPointerCapture(e.pointerId);
+    $("hint").style.display = "none";
+  };
+  ink.onpointermove = e => { if (!stroke) return; stroke.pts.push(pt(e)); clearInk(); strokes.filter(s => Math.abs(s.t - T) < 0.05).forEach(paint); paint(stroke); };
+  ink.onpointerup = ink.onpointercancel = () => {
+    if (!stroke) return;
+    if (stroke.moving) stroke.t = T;   // the video took a moment to stop: the drawing belongs to the frame it stopped on
+    delete stroke.moving;
+    stroke.w1 = wall(); strokes.push(stroke); log("stroke", { n: strokes.length - 1 }); stroke = null; renderDrafts();
+  };
+
+  // ---------- voice review ----------
+  let rec = null, recStart = 0, chunks = [], events = [], sampler = 0, actx = null;
+  let pausedMs = 0, pauseAt = 0;
+  const wall = () => rec ? ((recPaused() ? pauseAt : performance.now()) - recStart - pausedMs) / 1000 : null;
+  const recPaused = () => rec && rec.state === "paused";
+  function log(type, data) { if (rec && !recPaused()) events.push(Object.assign({ type, w: wall(), t: T, playing, rate: RATE }, data)); }
+  $("rec").onclick = async () => {
+    if (rec) { await finishRecording(); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) { msg("Voice reviews need this page opened from its https web address in Chrome, Edge or Firefox. Typed notes, cuts and drawings work here."); return; }
+    let stream;
+    try { const cl = $("cleanmic").checked;   // call-style processing: only useful on speakers
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: cl, noiseSuppression: cl, autoGainControl: cl, channelCount: 1, sampleRate: 48000 } }); }
+    catch (e) { msg("Microphone blocked: allow it in the address bar, then try again."); return; }
+    chunks = []; events = [];
+    const type = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find(t => MediaRecorder.isTypeSupported(t));
+    rec = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 128000 } : {});
+    rec.ondataavailable = e => chunks.push(e.data);
+    rec.start(1000); recStart = performance.now(); pausedMs = 0;
+    for (const s of strokes) { s.w0 = s.w1 = null; }   // drawings made before the recording have no place on its clock
+    $("recpause").style.display = ""; $("recpause").textContent = "❚❚ Pause review (R)";
+    try { actx = actx || new AudioContext(); if (actx.state === "suspended") actx.resume();
+      micAn = actx.createAnalyser(); micAn.fftSize = 1024; actx.createMediaStreamSource(stream).connect(micAn); micFloor = -60; } catch (e) { micAn = null; }
+    sampler = setInterval(() => log("clock", {}), 100);
+    $("rec").textContent = "■ Finish voice review"; $("recbadge").classList.add("on");
+    renderDrafts();
+    msg("Recording. Play the video and talk; draw on the picture to point. Press Finish when you're done.");
+  };
+  function togglePause() {
+    if (!rec) return;
+    if (rec.state === "recording") {
+      log("pause", {}); pauseAt = performance.now(); rec.pause(); clearInterval(sampler);
+      $("recpause").textContent = "● Resume review (R)"; $("recbadge").classList.add("paused");
+      msg("Review paused. Scrub, rewatch, take a break; nothing is recorded until you press Resume (or R).");
+    } else {
+      pausedMs += performance.now() - pauseAt; rec.resume();
+      sampler = setInterval(() => log("clock", {}), 100); log("resume", {});
+      $("recpause").textContent = "❚❚ Pause review (R)"; $("recbadge").classList.remove("paused");
+      msg("Recording again.");
+    }
+  }
+  $("recpause").onclick = togglePause;
+  async function finishRecording() {
+    clearInterval(sampler);
+    if (recPaused()) togglePause();
+    clearInterval(sampler);
+    $("recpause").style.display = "none";
+    const r = rec, dur = wall();
+    await new Promise(res => { r.onstop = res; r.stop(); });
+    rec = null; micAn = null;
+    r.stream.getTracks().forEach(t => t.stop());
+    $("rec").textContent = "● Start voice review"; $("recbadge").classList.remove("on");
+    const blob = new Blob(chunks, { type: r.mimeType || "audio/webm" });
+    const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(",")[1]); fr.readAsDataURL(blob); });
+    saveFile(payloadOf({ events, strokes: strokes.slice(), notes: drafts.map(noteOf), audio: b64, audioType: r.mimeType || "" }), dur);
+    drafts.length = 0; strokes.length = 0; renderDrafts(); drawMarks(); clearInk(); store.del(STASH);
+  }
+
+  // ---------- saving: a file the reviewer sends back (there is no server behind this page) ----------
+  const saved = [];
+  const pad = n => String(n).padStart(2, "0");
+  const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; };
+  const noteOf = d => ({ t: d.t, w: d.w ?? null, text: d.text, strokes: d.strokes, ...(d.cut ? { t2: d.t2, cut: true } : {}), ...(d.kind ? { kind: d.kind, group: d.group } : {}) });
+  function payloadOf(extra) {
+    return Object.assign({ session: SESSION, name: NAME, xml: "", fps: FPS, created: new Date().toISOString(), duration: TOTAL, source: SRC,
+      reviewer: $("who").value.trim(), page: "share-1", good: [...good], segLen }, extra);
+  }
+  function download(s) { const a = document.createElement("a"); a.href = s.url; a.download = s.file; document.body.appendChild(a); a.click(); a.remove(); }
+  function saveFile(payload, voiceSecs) {
+    const s = { file: `${SESSION}-${stamp()}.review.json`, url: URL.createObjectURL(new Blob([JSON.stringify(payload)], { type: "application/json" })), payload, voiceSecs };
+    saved.push(s); download(s); renderSaved();
+    msg(`Review saved as ${s.file} (in your Downloads folder). Send that file to the person who gave you this link.`);
+  }
+  const textOf = notes => notes.slice().sort((a, b) => a.t - b.t).map(n => `${fmtS(n.t)} ${n.text}`).join("\n");
+  function renderSaved() {
+    $("saved").innerHTML = saved.map((s, i) => { const n = s.payload.notes.length, d = s.payload.strokes.length;
+      return `<div class="rv" data-i="${i}"><b class="ok">✓ ${esc(s.file)}</b>
+        <span class="meta">${s.voiceSecs ? fmt(s.voiceSecs).slice(0, -3) + " of voice · " : ""}${n} typed note${n === 1 ? "" : "s"} · ${d} drawing${d === 1 ? "" : "s"}</span><span class="spacer"></span>
+        <button class="small" data-act="again">Download again</button>${n ? '<button class="small" data-act="text" title="The typed notes as plain text with their times, to paste in a chat">Copy notes as text</button>' : ""}</div>`; }).join("");
+  }
+  $("saved").onclick = e => {
+    const row = e.target.closest(".rv"); if (!row || !e.target.dataset.act) return;
+    const s = saved[+row.dataset.i];
+    if (e.target.dataset.act === "again") download(s);
+    if (e.target.dataset.act === "text") copyText(`Notes on ${NAME}\n` + textOf(s.payload.notes), "Notes copied as text.");
+  };
+  function copyText(text, done) {
+    const fallback = () => { let b = $("copybox"); if (!b) { b = document.createElement("textarea"); b.id = "copybox"; b.className = "copybox"; $("saved").after(b); }
+      b.value = text; b.focus(); b.select(); msg("Copy the text from the box below (Ctrl+C)."); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => msg(done), fallback); else fallback();
+  }
+  $("who").value = store.get("reviewer") || "";
+  $("who").addEventListener("input", () => store.set("reviewer", $("who").value));
+  window.addEventListener("beforeunload", e => { if (rec) { e.preventDefault(); e.returnValue = ""; } });
+  window.__review = { saved, get T() { return T; }, get playing() { return playing; }, P };
+
+  // ---------- UI ----------
+  const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, "0")}`;
+  const fmtS = t => fmt(t).slice(0, -1);
+  function msg(s) { $("msg").textContent = s; }
+  function drawBar() {
+    const bar = $("bar"); bar.innerHTML = "";
+    for (let s = 0; s < nseg(); s++) {
+      const d = document.createElement("div");
+      d.className = "seg" + (good.has(s) ? " good" : "");
+      d.style.left = X(s * segLen) + "%"; d.style.width = (Math.min(segLen, TOTAL - s * segLen) / VS() * 100) + "%";
+      d.innerHTML = `<span>${s + 1}${good.has(s) ? " ✓" : ""}</span>`; bar.appendChild(d);
+    }
+    const sp = VS(), step = [5, 10, 15, 30, 60, 120, 300].find(x => sp / x <= 12) || 600;
+    for (let t = Math.ceil(V0 / step) * step; t < V0 + sp; t += step) {
+      const k = document.createElement("div"); k.className = "tick"; k.style.left = X(t) + "%"; bar.appendChild(k);
+      const l = document.createElement("div"); l.className = "ticklbl"; l.style.left = X(t) + "%"; l.textContent = fmt(t).slice(0, -3); bar.appendChild(l);
+    }
+    $("viewlbl").textContent = sp < TOTAL - 0.5 ? `Showing ${fmt(V0).slice(0, -3)} to ${fmt(V0 + sp).slice(0, -3)}` : "";
+    const h = document.createElement("div"); h.className = "head"; h.id = "head"; bar.appendChild(h);
+    lastSeg = -1;
+    drawMarks();
+  }
+  function drawMarks() {
+    document.querySelectorAll(".mark, .cutreg, .nmark").forEach(m => m.remove());
+    const reg = (a, b, open) => { const m = document.createElement("div"); m.className = "cutreg" + (open ? " open" : ""); m.style.left = X(a) + "%"; if (!open) m.style.width = ((b - a) / VS() * 100) + "%"; $("bar").appendChild(m); };
+    for (const d of drafts) if (d.cut) reg(d.t, d.t2); else { const m = document.createElement("div"); m.className = "nmark"; m.style.left = X(d.t) + "%"; $("bar").appendChild(m); }
+    if (cutIn !== null) reg(cutIn, cutIn, true);
+    for (const s of strokes) { const m = document.createElement("div"); m.className = "mark"; m.style.left = X(s.t) + "%"; $("bar").appendChild(m); }
+  }
+  let lastSeg = -1;
+  function ui() {
+    $("time").textContent = `${fmt(T)} / ${fmt(TOTAL).slice(0, -3)}`;
+    if (playing && (T > Math.min(V1, TOTAL) - VS() * 0.02 || T < V0)) {      // a zoomed timeline follows the playhead
+      const sp = VS(); V0 = Math.max(0, Math.min(TOTAL - sp, T - sp * 0.1)); V1 = V0 + sp; drawBar();
+    }
+    $("head").style.left = X(T) + "%";
+    const s = segOf(T);
+    if (s !== lastSeg) { document.querySelectorAll(".seg").forEach((d, i) => d.classList.toggle("cur", i === s)); lastSeg = s; }
+    if (rec) $("rectime").textContent = (recPaused() ? "PAUSED " : "REC ") + fmt(wall()).slice(0, -3);
+  }
+  let dragging = false;
+  const barSeek = e => { const r = $("bar").getBoundingClientRect(); seek(V0 + Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * VS()); clearInk(); };
+  function zoomTo(span, anchor, frac) {
+    span = Math.max(8, Math.min(TOTAL, span));
+    V0 = Math.max(0, Math.min(TOTAL - span, anchor - frac * span)); V1 = V0 + span;
+    drawBar();
+  }
+  $("bar").addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = $("bar").getBoundingClientRect(), frac = (e.clientX - r.left) / r.width, at = V0 + frac * VS();
+    zoomTo(VS() * (e.deltaY < 0 ? 0.7 : 1 / 0.7), at, frac);
+  }, { passive: false });
+  const zoomStep = f => zoomTo(VS() * f, T, Math.max(0, Math.min(1, (T - V0) / VS())));
+  $("zin").onclick = () => zoomStep(0.5); $("zout").onclick = () => zoomStep(2); $("zfit").onclick = () => zoomTo(TOTAL, 0, 0);
+  document.querySelectorAll(".speed .sp").forEach(b => b.onclick = () => setRate(+b.dataset.r));
+  function setRate(r) {
+    RATE = r; P.rate(r); log("rate", {});
+    document.querySelectorAll(".speed .sp").forEach(b => b.classList.toggle("on", +b.dataset.r === r));
+    msg(`Playing at ${r}x.`);
+  }
+  $("bar").onpointerdown = e => { dragging = true; barSeek(e); };
+  window.addEventListener("pointermove", e => { if (dragging) barSeek(e); });
+  window.addEventListener("pointerup", () => { dragging = false; });
+  $("play").onclick = () => setPlaying(!want);
+  $("seglen").onchange = e => { segLen = +e.target.value; good.clear(); loopSeg = segOf(T); drawBar(); };
+  $("loop").onclick = () => { loop = !loop; loopSeg = segOf(T); $("loop").textContent = "Loop segment: " + (loop ? "on" : "off"); };
+  function markGood() {
+    const s = segOf(T); good.has(s) ? good.delete(s) : good.add(s);
+    store.set("good:" + SESSION, JSON.stringify([...good])); log("good", { seg: s, good: good.has(s) }); drawBar();
+    msg(good.has(s) ? `Segment ${s + 1} marked good.` : `Segment ${s + 1} unmarked.`);
+  }
+  $("good").onclick = markGood;
+  window.onkeydown = e => {
+    if (["SELECT", "INPUT", "TEXTAREA"].includes(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "n" || e.key === "N") { e.preventDefault(); $("noteText").focus(); return; }
+    const k = e.key;
+    if (k === " ") { e.preventDefault(); setPlaying(!want); }
+    else if (k === "ArrowLeft") seek(T - 2); else if (k === "ArrowRight") seek(T + 2);
+    else if (k === ",") seek(T - 1 / FPS); else if (k === ".") seek(T + 1 / FPS);
+    else if (k === "[") seek((segOf(T) - 1) * segLen); else if (k === "]") seek((segOf(T) + 1) * segLen);
+    else if (k === "l" || k === "L") $("loop").click();
+    else if (k === "g" || k === "G") markGood();
+    else if (k === "c" || k === "C") clearInk();
+    else if (k === "r" || k === "R") togglePause();
+    else if (k === "+" || k === "=") zoomStep(0.5); else if (k === "-") zoomStep(2); else if (k === "0") zoomTo(TOTAL, 0, 0);
+    else if (k === "i" || k === "I") markCutIn();
+    else if (k === "o" || k === "O") markCutOut();
+  };
+
+  // ---------- written notes ----------
+  const drafts = [];
+  let noteT = null;
+  const noteBox = $("noteText");
+  function stash() { if (drafts.length || strokes.length) store.set(STASH, JSON.stringify({ drafts, strokes })); else store.del(STASH); }
+  function startNote() {   // typing pins the note to this moment and pauses the video
+    if (noteT !== null) return;
+    if (playing || want) setPlaying(false);
+    noteT = T;
+  }
+  const attach = t => strokes.map((st, i) => [st, i]).filter(([st, i]) => Math.abs(st.t - t) < 0.08 && !drafts.some(d => d.strokes.includes(i))).map(([, i]) => i);
+  noteBox.addEventListener("focus", () => { if (noteBox.value) startNote(); });
+  noteBox.addEventListener("input", () => { if (noteBox.value.trim()) startNote(); else noteT = null; });
+  function addNote() {
+    const text = noteBox.value.trim();
+    if (!text) return;
+    const t = noteT ?? T;
+    drafts.push({ t, w: wall(), text, strokes: attach(t) });
+    log("note", { text });
+    noteBox.value = ""; noteT = null; noteBox.blur();
+    renderDrafts();
+    msg(rec ? "Note added to this review." : "Note added. Add more, then press Save review.");
+  }
+  // ---------- cut ranges: a quick "take this stretch out", marked at the playhead (rough on purpose) ----------
+  function markCutIn() { cutIn = T; drawMarks(); msg(`Cut starts at ${fmtS(T)}. Play or scrub to where it should end, then press O.`); }
+  function markCutOut() {
+    if (cutIn === null) { msg("Press I (or \"Cut from here\") where the cut should start first."); return; }
+    const a = Math.min(cutIn, T), b = Math.max(cutIn, T);
+    if (b - a < 0.05) { msg("That cut is empty: move the playhead to where it should end, then press O."); return; }
+    drafts.push({ t: a, t2: b, cut: true, kind: "Cut range", group: "cut", w: wall(), text: `Cut ${fmtS(a)} to ${fmtS(b)} (${(b - a).toFixed(1)} s)`, strokes: [] });
+    log("note", { text: drafts[drafts.length - 1].text });
+    cutIn = null; renderDrafts();
+    msg("Cut added to the notes. Click its text to add a reason, or ▶ to watch the video play across it.");
+  }
+  function previewCut(d) { seek(Math.max(0, d.t - 2)); setPlaying(true); cutPrev = { a: d.t, b: d.t2 }; }
+  $("cutIn").onclick = markCutIn; $("cutOut").onclick = markCutOut;
+  // ---------- quick notes: one click for the fixes and ideas asked for most (quick_notes.json beside the page replaces this list) ----------
+  let QUICK = { fix: ["Bad take", "Bad cut", "Cut this pause", "Word cut off", "Zoom on the wrong thing", "Zoom not centred", "Wrong sfx", "Sound too loud", "Wrong music", "Subtitles off", "Bad frame", "Put this back"],
+    idea: ["Zoom here", "Add a sound", "Add a whoosh", "Music change here", "Stop the music here", "Add an edit here", "Run-on, no cut", "B-roll here"] };
+  function drawQuick() {
+    const row = (g, label) => `<span class="lab">${label}</span>` + (QUICK[g] || []).map(k => `<button class="${g}" data-g="${g}" data-k="${esc(k)}" title="Add this note at the playhead. Anything typed in the note box is added to it.">${esc(k)}</button>`).join("");
+    $("quick").innerHTML = row("fix", "Fix") + '<span class="brk"></span>' + row("idea", "Idea");
+  }
+  drawQuick();
+  if (location.protocol.startsWith("http")) fetch("quick_notes.json").then(r => r.ok ? r.json() : null).then(q => { if (q && (q.fix || q.idea)) { QUICK = q; drawQuick(); } }).catch(() => {});
+  $("quick").onclick = e => {
+    const b = e.target.closest("button[data-k]");
+    if (!b) return;
+    const kind = b.dataset.k, extra = noteBox.value.trim(), t = noteT ?? T;
+    drafts.push({ t, w: wall(), text: extra ? `${kind}: ${extra}` : kind, strokes: attach(t), kind, group: b.dataset.g });
+    log("note", { text: drafts[drafts.length - 1].text });
+    noteBox.value = ""; noteT = null; b.blur(); renderDrafts();
+    msg(`"${kind}" added at ${fmtS(t)}. Click its text to add detail.`);
+  };
+  noteBox.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addNote(); } if (e.key === "Escape") noteBox.blur(); });
+  $("noteAdd").onclick = addNote;
+  function editInline(span, text, save) {   // swap a note's text for an input: Enter or leaving it saves, Escape cancels
+    const box = document.createElement("input");
+    box.className = "ed"; box.value = text; box.autocomplete = "off";
+    span.replaceWith(box); box.focus(); box.setSelectionRange(text.length, text.length);
+    let done = false;
+    const finish = keep => { if (done) return; done = true; const v = box.value.trim(); save(keep && v && v !== text ? v : null); };
+    box.addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); finish(true); } if (e.key === "Escape") finish(false); });
+    box.addEventListener("click", e => e.stopPropagation());
+    box.addEventListener("blur", () => finish(true));
+  }
+  function renderDrafts() {
+    const el = $("drafts");
+    drawMarks(); stash();
+    const loose = strokes.filter((s, i) => !drafts.some(d => d.strokes.includes(i))).length;
+    if (!drafts.length && !loose) { el.innerHTML = ""; return; }
+    const count = [drafts.length ? `${drafts.length} note${drafts.length === 1 ? "" : "s"}` : "", loose ? `${loose} drawing${loose === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
+    el.innerHTML = drafts.map((d, i) => `<div class="dn" data-i="${i}"><b data-t="${d.t}" title="Jump here">${fmtS(d.t)}</b>
+      <span>${d.group ? `<span class="tag">${esc(d.group)}</span>` : ""}${d.cut ? "✂" : "✎"} <span class="tx editable" title="Click to edit">${esc(d.text)}</span>${d.strokes.length ? ` <span class="meta">(+ drawing)</span>` : ""}</span>${d.cut ? `<span class="pv" title="Play the video across this cut">▶ preview</span>` : ""}<span class="x" title="Remove">×</span></div>`).join("") +
+      (loose ? `<div class="dn"><span class="meta">${loose} drawing${loose === 1 ? "" : "s"} with no note (the red dot${loose === 1 ? "" : "s"} on the timeline)</span><span class="x" id="dropLoose" title="Remove these drawings">×</span></div>` : "") +
+      (rec ? `<div class="bar2 meta">These notes will be saved with the voice review you're recording.</div>`
+           : `<div class="bar2"><button class="primary small" id="saveWritten">Save review (${count})</button>
+              <span class="meta">Downloads a file to send back. Your notes are also kept on this page until you save.</span></div>`);
+  }
+  $("drafts").onclick = e => {
+    const row = e.target.closest(".dn");
+    if (row && e.target.classList.contains("tx")) {
+      const i = +row.dataset.i;
+      editInline(e.target, drafts[i].text, v => { if (v) { drafts[i].text = v; msg("Note changed."); } renderDrafts(); });
+      return;
+    }
+    if (row && e.target.classList.contains("pv")) { previewCut(drafts[+row.dataset.i]); return; }
+    if (e.target.dataset.t) { seek(+e.target.dataset.t); clearInk(); return; }
+    if (e.target.id === "dropLoose") {   // drawings no note points at: take them out and renumber the notes' drawings
+      const keep = strokes.map((s, i) => drafts.some(d => d.strokes.includes(i))), map = [];
+      let k = 0; keep.forEach((v, i) => { map[i] = v ? k++ : -1; });
+      for (let i = strokes.length - 1; i >= 0; i--) if (!keep[i]) strokes.splice(i, 1);
+      for (const d of drafts) d.strokes = d.strokes.map(i => map[i]);
+      clearInk(); renderDrafts(); return;
+    }
+    if (row && e.target.classList.contains("x")) { drafts.splice(+row.dataset.i, 1); renderDrafts(); return; }
+    if (e.target.id === "saveWritten") {   // every drawing is saved, with or without a note
+      const notes = drafts.map(d => Object.assign(noteOf(d), { w: null }));
+      saveFile(payloadOf({ events: [], strokes: strokes.map(s => Object.assign({}, s, { w0: null, w1: null })), notes, audio: "" }));
+      drafts.length = 0; strokes.length = 0; renderDrafts(); drawMarks(); clearInk(); store.del(STASH);
+    }
+  };
+  setInterval(() => { $("noteAt").textContent = fmtS(noteT ?? T); }, 100);
+
+  // notes typed on an earlier visit that were never saved to a file
+  try {
+    const old = JSON.parse(store.get(STASH) || "null");
+    if (old && Array.isArray(old.drafts) && old.drafts.length + (old.strokes || []).length) {
+      for (const s of old.strokes || []) strokes.push(Object.assign(s, { w0: null, w1: null }));
+      for (const d of old.drafts) drafts.push(Object.assign(d, { w: null }));
+      msg("What you noted last time and never saved is back: " + [drafts.length ? `${drafts.length} note${drafts.length === 1 ? "" : "s"}` : "", strokes.length ? `${strokes.length} drawing${strokes.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ") + ".");
+    }
+  } catch (e) {}
+
+  const v = store.get("reviewVol"); if (v !== null) $("vol").value = v;
+  $("vol").addEventListener("input", () => store.set("reviewVol", $("vol").value));
+  drawBar(); renderDrafts();
+  const loopRaf = () => { tick(); requestAnimationFrame(loopRaf); };
+  setInterval(() => { if (performance.now() - lastTick > 120) tick(); }, 40);   // hidden tabs get no animation frames
+  requestAnimationFrame(loopRaf);
+}
+</script>
+</body>
+</html>
