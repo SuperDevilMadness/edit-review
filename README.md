@@ -4,7 +4,7 @@ A free page for reviewing a video edit: watch it from a link, type notes on exac
 cut, draw on the picture, and talk through it if you like. No account and no upload: the review is saved as a
 file you send back to the editor.
 
-It is one file, `index.html`, with no server behind it.
+It is one file, `index.html`, with no server behind it. Live at <https://superdevilmadness.github.io/edit-review/>.
 
 ## Review a video
 
@@ -36,8 +36,8 @@ Notes you typed but didn't save come back when you open the same link again in t
 ## Good to know
 
 - Private YouTube videos don't play; unlisted and public ones do.
-- On YouTube the frame-step keys move by small steps, not exact frames, and until you have pressed Play once a
-  paused frame shows YouTube's play icon in the middle.
+- On YouTube the frame-step keys move by small steps, not exact frames, and a paused frame can show YouTube's
+  play icon in the middle (YouTube draws it; the page can't remove it).
 - A voice review is a big file: about 1.3 MB a minute.
 - `quick_notes.json` is the list of Fix and Idea buttons; edit it to change them.
 - `&fps=60` in the link sets the size of the frame-step keys (default 30).
