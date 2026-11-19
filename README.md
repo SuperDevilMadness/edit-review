@@ -12,13 +12,13 @@ Open the page and paste the video's link, or use a ready-made link:
 
 | The video is | Link | How it plays |
 |---|---|---|
-| on YouTube (public or unlisted) | `?yt=VIDEO_ID&s=NAME` | In the page. |
-| on Google Drive | `?drive=FILE_ID&s=NAME` | Drive doesn't let other pages play its videos, so the page asks you to download the video and pick the file. |
-| a direct `.mp4` / `.webm` address | `?v=ENCODED_ADDRESS&s=NAME` | In the page, if the host allows it. |
+| on YouTube (public or unlisted) | `?yt=VIDEO_ID` | In the page. |
+| on Google Drive | `?drive=FILE_ID` | Drive doesn't let other pages play its videos, so the page asks you to download the video and pick the file. |
+| a direct `.mp4` / `.webm` address | `?v=ENCODED_ADDRESS` | In the page, if the host allows it. |
 | a file on your computer | pick it on the page | In the page. |
 
-`NAME` is the edit's name (for example `my-video-v2`) and is optional. Use the name the editor gave you: it tells
-them which version your notes are about.
+The review is named after the video: its YouTube title, or the file's name. Adding `&s=NAME` to the link gives it
+another name.
 
 Then:
 

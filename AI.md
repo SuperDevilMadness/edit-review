@@ -24,19 +24,18 @@ written `PAGE/`) and add the video:
 
 | The video is | The review link |
 |---|---|
-| on YouTube (public or unlisted) | `PAGE/?yt=VIDEO_ID&s=NAME` |
-| on Google Drive | `PAGE/?drive=FILE_ID&s=NAME` |
-| a direct `.mp4` / `.webm` address | `PAGE/?v=URL_ENCODED_ADDRESS&s=NAME` |
+| on YouTube (public or unlisted) | `PAGE/?yt=VIDEO_ID` |
+| on Google Drive | `PAGE/?drive=FILE_ID` |
+| a direct `.mp4` / `.webm` address | `PAGE/?v=URL_ENCODED_ADDRESS` |
 
 - `VIDEO_ID` is the 11 characters of a YouTube link: `youtu.be/VIDEO_ID`, `youtube.com/watch?v=VIDEO_ID`,
   `youtube.com/shorts/VIDEO_ID`, `youtube.com/live/VIDEO_ID`.
 - `FILE_ID` is the long part of a Drive link: `drive.google.com/file/d/FILE_ID/view` or `...?id=FILE_ID`.
-- `NAME` is the name of the edit being reviewed, for example `my-video-v2`. Letters, digits, `.`, `_` and `-`
-  only. If the person who made the video gave a name, use exactly that one: it is how the review file finds
-  its way back to the right version. If you have no name, leave `&s=NAME` off.
+- The review names itself after the video (its YouTube title, or the file's name), so you don't give a name.
+  Only if the person asks for a particular name, add `&s=NAME` (letters, digits, `.`, `_` and `-`).
 - If you are unsure, you can also hand over `PAGE/` alone: it has a box where the link is pasted.
 
-Example: the video `https://youtu.be/aqz-KE-bpKQ`, edit name `bunny-v3`, becomes `PAGE/?yt=aqz-KE-bpKQ&s=bunny-v3`.
+Example: the video `https://youtu.be/aqz-KE-bpKQ` becomes `PAGE/?yt=aqz-KE-bpKQ`.
 
 ## What to tell the reviewer
 
@@ -62,7 +61,7 @@ Example: the video `https://youtu.be/aqz-KE-bpKQ`, edit name `bunny-v3`, becomes
 
 If someone hands you a `.review.json`, it is JSON with:
 
-- `session`, `name`: the edit's name. `source`: where the video was. `duration`: its length in seconds.
+- `session`, `name`: the review's name, taken from the video's title. `source`: where the video was. `duration`: its length in seconds.
   `reviewer`: the reviewer's name if they gave one.
 - `notes`: the typed notes. Each has `t` (seconds into the video) and `text`. A cut has `cut: true` and `t2`
   (cut from `t` to `t2`; the ends are rough on purpose). A quick note has `kind` and `group` (`fix` or `idea`).

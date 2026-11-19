@@ -11,10 +11,11 @@
   review as a .review.json file the reviewer sends back.
 
   A session is only an address:
-    index.html?yt=VIDEO_ID&s=NAME        YouTube (public or unlisted)
-    index.html?drive=FILE_ID&s=NAME      Google Drive file: the reviewer downloads it, then picks the file (Drive blocks playing in a page)
-    index.html?v=ENCODED_URL&s=NAME      any YouTube / Drive / direct .mp4 address, URL-encoded
-  s (the edit's name) is optional. AI.md beside this file says how to build the link for someone.
+    index.html?yt=VIDEO_ID        YouTube (public or unlisted)
+    index.html?drive=FILE_ID      Google Drive file: the reviewer downloads it, then picks the file (Drive blocks playing in a page)
+    index.html?v=ENCODED_URL      any YouTube / Drive / direct .mp4 address, URL-encoded
+  The review is named after the video's title (or the file's name); &s=NAME overrides that.
+  AI.md beside this file says how to build the link for someone.
 -->
 <style>
   :root { --bg: #0f0d14; --panel: #1a1622; --line: #2c2638; --text: #ece8f4; --dim: #9a93aa; --accent: #9d5cff; --good: #3ccf7a; --rec: #ff4d5e; }
@@ -113,7 +114,6 @@
     <h2>Review a video</h2>
     <p class="meta">Paste the link to the video. You get a page where you type notes on exact moments, mark stretches to cut, draw on the picture and, if you like, talk through it. Nothing is uploaded: your review is saved as a file you send back.</p>
     <input type="text" id="plink" placeholder="YouTube or Google Drive link" autocomplete="off">
-    <input type="text" id="pname" placeholder="Name of this edit (optional, e.g. my-video-v2)" autocomplete="off">
     <div><button class="primary" id="pgo">Open the review page</button></div>
     <div class="err meta" id="perr"></div>
     <p class="meta">YouTube: public and unlisted videos work, private ones don't. Google Drive: you'll be asked to download the video first, because Drive doesn't let other pages play it.</p>
@@ -184,7 +184,7 @@
 const qs = new URLSearchParams(location.search);
 const $ = id => document.getElementById(id);
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const clean = s => String(s || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+const clean = s => String(s || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "").slice(0, 80).replace(/-+$/, "");
 const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
                 set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }, del(k) { try { localStorage.removeItem(k); } catch (e) {} } };
 const YT_ID = /^[A-Za-z0-9_-]{11}$/, DRIVE_ID = /^[A-Za-z0-9_-]{15,}$/;
@@ -316,18 +316,17 @@ function youtube(id) {
   if (src) { start(src); return; }
   $("picker").style.display = "";
   if (qs.get("yt") || qs.get("drive") || qs.get("v")) $("perr").textContent = "The link in this page's address isn't a YouTube, Google Drive or video link. Paste the video's link below.";
-  if (qs.get("s")) $("pname").value = clean(qs.get("s"));
   const go = () => {
     const s = parseLink($("plink").value);
     if (!s) { $("perr").textContent = "That doesn't look like a YouTube or Google Drive link. Paste the whole link, starting with https://"; return; }
-    location.href = linkFor(s, $("pname").value);
+    location.href = linkFor(s, qs.get("s"));
   };
   $("pgo").onclick = go;
-  for (const id of ["plink", "pname"]) $(id).addEventListener("keydown", e => { if (e.key === "Enter") go(); });
-  $("pfile").onchange = e => { const f = e.target.files[0]; if (f) start({ kind: "file", url: URL.createObjectURL(f), name: f.name }, $("pname").value); };
+  $("plink").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  $("pfile").onchange = e => { const f = e.target.files[0]; if (f) start({ kind: "file", url: URL.createObjectURL(f), name: f.name }); };
 })();
 
-async function start(src, pickedName) {
+async function start(src) {
   $("picker").style.display = "none"; $("review").style.display = "";
   let P;
   const slow = setTimeout(() => { $("loading").textContent = "Still loading the video…"; }, 8000);
@@ -342,10 +341,13 @@ async function start(src, pickedName) {
   }
   clearTimeout(slow); $("loading").style.display = "none";
   const FPS = +qs.get("fps") || 30, TOTAL = P.dur();
-  const given = clean(qs.get("s") || pickedName);
-  const SESSION = given || clean(src.kind === "youtube" ? "yt-" + src.id : src.kind === "drive" ? "drive-" + src.id.slice(0, 10)
-    : (src.name || src.url.split(/[?#]/)[0].split("/").pop() || "").replace(/\.[A-Za-z0-9]+$/, "")) || "review";
-  const NAME = given || P.title() || SESSION;
+  // The review is named after the video: its YouTube title, or the file's name. &s=NAME in the link overrides it.
+  let title = P.title() || (src.url || "").split(/[?#]/)[0].split("/").pop() || "";
+  try { title = decodeURIComponent(title); } catch (e) {}
+  title = title.replace(/\.(mp4|mov|mkv|webm|m4v|avi)$/i, "").trim();
+  const given = clean(qs.get("s"));
+  const SESSION = given || clean(title) || (src.kind === "youtube" ? "yt-" + src.id : "review");
+  const NAME = given || title || SESSION;
   const SRC = src.kind === "youtube" || src.kind === "drive" ? { kind: src.kind, id: src.id } : src.kind === "file" ? { kind: "file", name: src.name } : { kind: "url", url: src.url };
   const STASH = "draft:" + SESSION;
   $("name").textContent = NAME; document.title = "Review: " + NAME;
