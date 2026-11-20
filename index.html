@@ -67,6 +67,9 @@
   .sharebar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 10px; padding: 8px 12px; background: var(--panel); border-radius: 6px; font-size: 12px; color: var(--dim); }
   .sharebar .on { color: #2ec4b6; } .sharebar .bad { color: var(--rec); }
   .sharebar input { padding: 4px 8px; font-size: 12px; width: 180px; }
+  .whobar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 10px; padding: 8px 12px; background: var(--panel); border-radius: 6px; font-size: 13px; }
+  .whobar input { padding: 5px 9px; font-size: 13px; width: 220px; }
+  .whobar.empty input { outline: 2px solid #ffae42; }
   .fixes { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
   .fixes h2 { font-size: 14px; margin: 0 0 8px; }
   .reply { background: var(--panel); border-radius: 6px; padding: 10px 12px; margin-top: 8px; }
@@ -154,6 +157,8 @@
     <p class="meta">Or review a video file that is on this computer: <input type="file" id="pfile" accept="video/*"></p>
   </div>
   <div id="review" style="display:none">
+    <div class="whobar" id="whobar"><label>Your name <input type="text" id="who" placeholder="type it first: it goes on your notes" autocomplete="off" maxlength="60"></label>
+      <span class="meta">Remembered on this computer.</span></div>
     <div class="stage" id="stage">
       <div id="player"></div>
       <canvas id="ink" width="960" height="540"></canvas>
@@ -188,8 +193,7 @@
       <button id="rec" class="rec" title="Record yourself talking through the video. Optional: typed notes work without it.">● Start voice review</button>
       <button id="recpause" style="display:none" title="Pause the recording (R). Scrub or rewatch freely; nothing is recorded until you resume.">❚❚ Pause review (R)</button>
     </div>
-    <div class="sharebar" id="sharebar"><span id="sharestate">Notes stay on this computer.</span><span class="spacer"></span>
-      <label>Your name <input type="text" id="who" placeholder="shown on your notes" autocomplete="off" maxlength="60"></label></div>
+    <div class="sharebar" id="sharebar"><span id="sharestate">Notes stay on this computer.</span></div>
     <div class="notebox">
       <span class="at" id="noteAt">0:00.0</span>
       <input type="text" id="noteText" placeholder="Type a note about this moment… (Enter to add; press N to jump here)" autocomplete="off">
@@ -732,7 +736,8 @@ self.onmessage = async e => {
     if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => msg(done), fallback); else fallback();
   }
   $("who").value = store.get("reviewer") || "";
-  $("who").addEventListener("input", () => store.set("reviewer", $("who").value));
+  $("who").addEventListener("input", () => { store.set("reviewer", $("who").value); $("whobar").classList.toggle("empty", !$("who").value.trim()); });
+  $("whobar").classList.toggle("empty", !$("who").value.trim());
   window.addEventListener("beforeunload", e => { if (rec || (memOnly && saved.some(r => !r.downloaded && !r.sent))) { e.preventDefault(); e.returnValue = ""; } });
   window.__review = { saved, held, get T() { return T; }, get playing() { return playing; }, P };
 
