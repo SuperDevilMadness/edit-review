@@ -32,6 +32,13 @@ Then:
    `.review.json` file copy; it is also how the voice recording itself gets to the editor, since Send carries
    only the written-out words.
 
+## Fixes and sign-off
+
+When the editor has fixed what you noted, the fixes come back on the same link: open it again and look under
+**Fixes from the editor**. Each fix shows your note, what was changed and **▶ Watch** (it plays that fix in the
+clips video). Mark each one **Looks good** or **Needs more work** (say what), then **Send sign-off**. The editor
+gets it straight away.
+
 ## Shared notes
 
 With a YouTube or Google Drive link, your notes go online as you write them (put your name in "Your name" so

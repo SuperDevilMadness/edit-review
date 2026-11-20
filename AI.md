@@ -51,6 +51,12 @@ Example: the video `https://youtu.be/aqz-KE-bpKQ` becomes `PAGE/?yt=aqz-KE-bpKQ`
    **Download** and send the `.review.json` file that lands in Downloads back to the person who gave you the link.
    A voice review sends the written-out words; to pass on the recording itself, Download and send the file too.
 
+## Fixes and sign-off
+
+After a review is sent, the editor may post the fixes back on the same link. Tell the reviewer to reopen it: a
+"Fixes from the editor" section lists each fix with a clip, and they answer Looks good / Needs more work for each,
+then press Send sign-off. The page can't notify them, so whoever gave them the link should tell them.
+
 ## Limits you should know and say
 
 - **Private YouTube videos don't play.** Unlisted and public ones do.

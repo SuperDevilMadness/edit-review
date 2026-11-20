@@ -67,6 +67,19 @@
   .sharebar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 10px; padding: 8px 12px; background: var(--panel); border-radius: 6px; font-size: 12px; color: var(--dim); }
   .sharebar .on { color: #2ec4b6; } .sharebar .bad { color: var(--rec); }
   .sharebar input { padding: 4px 8px; font-size: 12px; width: 180px; }
+  .fixes { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .fixes h2 { font-size: 14px; margin: 0 0 8px; }
+  .reply { background: var(--panel); border-radius: 6px; padding: 10px 12px; margin-top: 8px; }
+  .reply .clip { position: relative; width: 100%; max-width: 640px; aspect-ratio: 16 / 9; margin: 8px 0; background: #000; border-radius: 6px; overflow: hidden; }
+  .reply .clip iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .fx { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+  .fx .n { color: #2ec4b6; font-weight: 600; min-width: 44px; }
+  .fx .what { flex: 1 1 320px; min-width: 0; }
+  .fx .what .was { color: var(--dim); }
+  .fx .what a { color: #2ec4b6; }
+  .fx .ans label { margin-right: 10px; white-space: nowrap; }
+  .fx input.fxc { flex-basis: 100%; }
+  .reply textarea { width: 100%; min-height: 50px; margin-top: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
   #others { margin-top: 8px; }
   #others .hd { color: var(--dim); font-size: 12px; margin: 6px 0 2px; }
   #others .on { display: flex; gap: 10px; align-items: baseline; padding: 3px 8px; border-radius: 4px; cursor: pointer; }
@@ -197,6 +210,7 @@
       <span><kbd>C</kbd> clear drawing</span><span><kbd>N</kbd> type a note</span><span><kbd>I</kbd> <kbd>O</kbd> cut from / to here</span><span><kbd>S</kbd> <kbd>E</kbd> section to note: start / end</span><span><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> timeline zoom</span><span><kbd>R</kbd> pause / resume voice review</span>
       <span class="dimtxt">Draw on the picture to point (it pauses the video).</span>
     </div>
+    <section class="fixes" id="fixes" style="display:none"><h2>Fixes from the editor</h2><div id="fixlist"></div></section>
     <section class="reviews">
       <h2>Your reviews <span class="meta" id="rvcount"></span></h2>
       <div class="meta" id="reviewshelp">A saved review is kept on this page, in this browser, until you download it. When you're done, press <b>Download</b> and send the <b>.review.json</b> file to the person who gave you this link (Discord, email, anything).</div>
@@ -1139,13 +1153,75 @@ self.onmessage = async e => {
     async function start() {
       if (!VID) { status("off"); return; }
       status("connecting");
-      try { await signIn(); await fresh(); status("ok"); await poll(); }
+      try { await signIn(); await fresh(); status("ok"); await poll(); await loadReplies(); }
       catch (e) { status("bad", e.message); setTimeout(start, 15000); return; }
       setInterval(poll, 20000);
+      setInterval(loadReplies, 60000);
       document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
       if (dirty) flush();
     }
-    return { changed, settle, send, start, others, get on() { return !!VID && !!auth; } };
+    // ---------- fixes the editor sent back (shared_notes.py --reply), each signed off here ----------
+    const replies = new Map();
+    async function loadReplies() {
+      if (!VID || !auth) return;
+      try {
+        await fresh();
+        const rows = await api(`${FS}${DOCS}/videos/${VID}:runQuery`, { structuredQuery: { from: [{ collectionId: "replies" }], limit: 50 } });
+        let changedAny = false;
+        for (const x of rows) if (x.document) {
+          const rid = x.document.name.split("/").pop(), d = Object.fromEntries(Object.entries(x.document.fields || {}).map(([k, v]) => [k, unfs(v)]));
+          if (!/^[A-Za-z0-9_-]{11}$/.test(d.clips || "") || !Array.isArray(d.items)) continue;
+          if (!replies.has(rid) || JSON.stringify(replies.get(rid)) !== JSON.stringify(d)) { replies.set(rid, d); changedAny = true; }
+        }
+        if (changedAny) renderFixes();
+      } catch (e) {}
+    }
+    function renderFixes() {
+      const list = [...replies.entries()].sort((a, b) => String(b[1].made).localeCompare(String(a[1].made)));
+      $("fixes").style.display = list.length ? "" : "none";
+      $("fixlist").innerHTML = list.map(([rid, d]) => {
+        const signed = store.get("signed:" + rid), mine = d.forUid === auth.uid;
+        const when = d.made ? new Date(d.made).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+        return `<div class="reply" data-rid="${esc(rid)}"><div class="meta">For ${esc(d.forWho || "a reviewer")}'s review${mine ? " (yours)" : ""} · ${esc(when)} · ${d.items.length} fix${d.items.length === 1 ? "" : "es"}</div>`
+          + (d.message ? `<div style="margin-top:4px">${esc(d.message)}</div>` : "")
+          + `<div class="clip"><iframe src="https://www.youtube-nocookie.com/embed/${d.clips}?rel=0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="Fix clips"></iframe></div>`
+          + d.items.map(it => `<div class="fx" data-n="${+it.n}"><span class="n">Fix ${+it.n}</span>
+              <span class="what"><span class="was">At <a href="#" data-act="jump" data-t="${+it.t}">${fmtS(+it.t)}${it.t2 != null ? "–" + fmtS(+it.t2) : ""}</a>: “${esc(it.note || "")}”</span><br>${esc(it.changed || "")}</span>
+              <button class="small" data-act="watch" data-at="${+it.at}" title="Play this fix in the clips video">▶ Watch</button>
+              ${signed ? "" : `<span class="ans"><label><input type="radio" name="ok-${esc(rid)}-${+it.n}" value="1"> Looks good</label><label><input type="radio" name="ok-${esc(rid)}-${+it.n}" value="0"> Needs more work</label></span>
+              <input type="text" class="fxc" placeholder="What still needs work? (only if it does)" maxlength="2000" autocomplete="off">`}</div>`).join("")
+          + (signed ? `<div class="meta" style="margin-top:8px; color:var(--good)">✓ Sign-off sent ${esc(signed)}.</div>`
+             : `<textarea class="fxcomment" placeholder="Anything else? (optional)" maxlength="2000"></textarea>
+                <div style="margin-top:8px"><button class="primary small" data-act="signoff">Send sign-off</button> <span class="meta">Answer each fix, then send. The editor gets it straight away.</span></div>`)
+          + `</div>`;
+      }).join("");
+    }
+    $("fixlist").onclick = async e => {
+      const box = e.target.closest(".reply"); if (!box) return;
+      const rid = box.dataset.rid, d = replies.get(rid), act = e.target.dataset.act;
+      if (act === "watch") { box.querySelector("iframe").src = `https://www.youtube-nocookie.com/embed/${d.clips}?rel=0&autoplay=1&start=${Math.floor(+e.target.dataset.at)}`; return; }
+      if (act === "jump") { e.preventDefault(); if (playing || want) setPlaying(false); seek(+e.target.dataset.t); return; }
+      if (act !== "signoff") return;
+      const items = [];
+      for (const row of box.querySelectorAll(".fx")) {
+        const pick = row.querySelector("input[type=radio]:checked"); if (!pick) continue;
+        items.push({ n: +row.dataset.n, ok: pick.value === "1", text: (row.querySelector(".fxc").value || "").trim().slice(0, 2000) });
+      }
+      const comment = (box.querySelector(".fxcomment").value || "").trim().slice(0, 2000);
+      if (!items.length && !comment) { msg("Pick Looks good or Needs more work on at least one fix first."); return; }
+      if (items.length < d.items.length && !confirm(`You answered ${items.length} of ${d.items.length} fixes. Send the sign-off anyway?`)) return;
+      e.target.disabled = true;
+      try {
+        await fresh();
+        const name = `${DOCS}/signoffs/${rid}-${auth.uid.slice(0, 12)}-${Date.now().toString(36)}`;
+        await api(`${FS}${DOCS}:commit`, { writes: [{ update: { name, fields: { uid: fs(auth.uid), who: fs(whoName()), vid: fs(VID), reply: fs(rid), items: fs(items), comment: fs(comment) } },
+          updateTransforms: [{ fieldPath: "at", setToServerValue: "REQUEST_TIME" }], currentDocument: { exists: false } }] });
+        store.set("signed:" + rid, new Date().toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }));
+        renderFixes();
+        msg(items.every(x => x.ok) && !comment ? "Sign-off sent: all good. Thanks!" : "Sign-off sent. The editor has your answers now.");
+      } catch (err) { e.target.disabled = false; msg(`Couldn't send the sign-off (${String(err.message).slice(0, 80)}). Try again in a moment.`); }
+    };
+    return { changed, settle, send, start, others, loadReplies, get on() { return !!VID && !!auth; } };
   })();
   $("who").addEventListener("input", () => { if (SH) SH.changed(); });
   SH.start().then(() => renderSaved());
