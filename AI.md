@@ -14,8 +14,10 @@ the reviewer:
 - draw on the picture to point at something,
 - optionally record their voice while they watch.
 
-Nothing is uploaded. When the reviewer saves, the page downloads a `.review.json` file. They send that file to
-the person who asked for the review.
+With a YouTube or Google Drive link, the notes are shared: everyone who opens the same link sees each other's
+notes as they are written, and **Send** delivers a saved review straight to the editor. Tell the reviewer to fill
+in "Your name" and that anyone with the link can read the notes. With any other video, nothing leaves the page:
+the reviewer downloads a `.review.json` file and sends it to the person who asked for the review.
 
 ## Making a review link
 
@@ -45,8 +47,9 @@ Example: the video `https://youtu.be/aqz-KE-bpKQ` becomes `PAGE/?yt=aqz-KE-bpKQ`
 3. **S** and **E** mark the start and end of a section to write one note about (nothing is cut).
 4. Press **Save review** (or finish the voice review). The review is kept on the page under "Your reviews";
    a voice review is written out there so they can check what they said.
-5. Press **Download** on the review when they are done. A `.review.json` file lands in Downloads.
-6. Send that file back to the person who gave you the link.
+5. Press **Send** on the review (YouTube and Drive links): the editor has it at once. Otherwise press
+   **Download** and send the `.review.json` file that lands in Downloads back to the person who gave you the link.
+   A voice review sends the written-out words; to pass on the recording itself, Download and send the file too.
 
 ## Limits you should know and say
 

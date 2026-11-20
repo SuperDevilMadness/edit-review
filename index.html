@@ -62,6 +62,17 @@
   .cutreg.open { background: none; border-right: none; }
   .hlreg { position: absolute; top: 0; bottom: 0; background: #ffd43b33; border-left: 2px solid #ffd43b; border-right: 2px solid #ffd43b; pointer-events: none; }
   .hlreg.open { background: none; border-right: none; }
+  .omark { position: absolute; top: 4px; width: 2px; height: 10px; margin-left: -1px; background: #2ec4b6; pointer-events: none; }
+  .oreg { position: absolute; top: 0; height: 5px; background: #2ec4b6aa; pointer-events: none; }
+  .sharebar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 10px; padding: 8px 12px; background: var(--panel); border-radius: 6px; font-size: 12px; color: var(--dim); }
+  .sharebar .on { color: #2ec4b6; } .sharebar .bad { color: var(--rec); }
+  .sharebar input { padding: 4px 8px; font-size: 12px; width: 180px; }
+  #others { margin-top: 8px; }
+  #others .hd { color: var(--dim); font-size: 12px; margin: 6px 0 2px; }
+  #others .on { display: flex; gap: 10px; align-items: baseline; padding: 3px 8px; border-radius: 4px; cursor: pointer; }
+  #others .on:hover { background: #ffffff10; }
+  #others .on b { color: #2ec4b6; font-variant-numeric: tabular-nums; min-width: 52px; }
+  #others .on .who { color: #2ec4b6; font-size: 12px; white-space: nowrap; }
   .chip { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
   .chip.ok { border-color: var(--good); color: var(--good); }
   .said { flex-basis: 100%; display: none; margin-top: 4px; border-top: 1px solid var(--line); padding-top: 8px; }
@@ -122,7 +133,7 @@
 <main id="app">
   <div class="picker" id="picker" style="display:none">
     <h2>Review a video</h2>
-    <p class="meta">Paste the link to the video. You get a page where you type notes on exact moments, mark stretches to cut, draw on the picture and, if you like, talk through it. Nothing is uploaded: your review is saved as a file you send back.</p>
+    <p class="meta">Paste the link to the video. You get a page where you type notes on exact moments, mark stretches to cut, draw on the picture and, if you like, talk through it. With a YouTube or Google Drive link, notes are shared with everyone who has the link and Send delivers your review to the editor; anything else stays on your computer as a file you send back.</p>
     <input type="text" id="plink" placeholder="YouTube or Google Drive link" autocomplete="off">
     <div><button class="primary" id="pgo">Open the review page</button></div>
     <div class="err meta" id="perr"></div>
@@ -164,6 +175,8 @@
       <button id="rec" class="rec" title="Record yourself talking through the video. Optional: typed notes work without it.">● Start voice review</button>
       <button id="recpause" style="display:none" title="Pause the recording (R). Scrub or rewatch freely; nothing is recorded until you resume.">❚❚ Pause review (R)</button>
     </div>
+    <div class="sharebar" id="sharebar"><span id="sharestate">Notes stay on this computer.</span><span class="spacer"></span>
+      <label>Your name <input type="text" id="who" placeholder="shown on your notes" autocomplete="off" maxlength="60"></label></div>
     <div class="notebox">
       <span class="at" id="noteAt">0:00.0</span>
       <input type="text" id="noteText" placeholder="Type a note about this moment… (Enter to add; press N to jump here)" autocomplete="off">
@@ -175,6 +188,7 @@
     </div>
     <div class="quick" id="quick"></div>
     <div id="drafts"></div>
+    <div id="others"></div>
     <div class="msg" id="msg"></div>
     <div class="shortcuts">
       <span><kbd>Space</kbd> play / pause</span><span><kbd>←</kbd> <kbd>→</kbd> back / forward 2 s</span>
@@ -185,8 +199,7 @@
     </div>
     <section class="reviews">
       <h2>Your reviews <span class="meta" id="rvcount"></span></h2>
-      <div class="meta">A saved review is kept on this page, in this browser, until you download it. When you're done, press <b>Download</b> and send the <b>.review.json</b> file to the person who gave you this link (Discord, email, anything). Nothing leaves this page by itself.</div>
-      <div style="margin-top:8px"><input type="text" id="who" placeholder="Your name (optional, saved in the file)" autocomplete="off" style="width:280px; max-width:100%"></div>
+      <div class="meta" id="reviewshelp">A saved review is kept on this page, in this browser, until you download it. When you're done, press <b>Download</b> and send the <b>.review.json</b> file to the person who gave you this link (Discord, email, anything).</div>
       <div id="saved"></div>
     </section>
   </div>
@@ -378,6 +391,7 @@ async function start(src) {
   const NAME = given || title || SESSION;
   const SRC = src.kind === "youtube" || src.kind === "drive" ? { kind: src.kind, id: src.id } : src.kind === "file" ? { kind: "file", name: src.name } : { kind: "url", url: src.url };
   const STASH = "draft:" + SESSION;
+  let SH = null;   // the shared notes (set up near the end), null until then and on links that can't be shared
   $("name").textContent = NAME; document.title = "Review: " + NAME;
   $("status").textContent = `${{ youtube: "YouTube", drive: "Google Drive", url: "video link", file: "file on this computer" }[src.kind]} · ${(TOTAL / 60).toFixed(1)} min`;
   if (src.kind !== "file") { $("copylink").style.display = ""; $("copylink").onclick = () => copyText(location.href, "Review link copied."); }
@@ -529,9 +543,10 @@ async function start(src) {
     $("rec").textContent = "● Start voice review"; $("recbadge").classList.remove("on");
     const blob = new Blob(chunks, { type: r.mimeType || "audio/webm" });
     const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(",")[1]); fr.readAsDataURL(blob); });
-    const rv = await keep(payloadOf({ events, strokes: strokes.slice(), notes: drafts.map(noteOf), audio: b64, audioType: r.mimeType || "" }), dur);
+    if (SH) SH.settle(drafts, "saved");
+    const rv = await keep(payloadOf({ events, strokes: strokes.slice(), notes: drafts.map(noteOf), audio: b64, audioType: r.mimeType || "" }), dur, drafts.map(d => d.nid).filter(Boolean));
     drafts.length = 0; strokes.length = 0; renderDrafts(); drawMarks(); clearInk(); store.del(STASH);
-    msg("Voice review saved on this page. What you said is being written out below; press Download when you're ready to send it.");
+    msg(SH && SH.on ? "Voice review saved on this page. What you said is being written out below; press Send when you're ready." : "Voice review saved on this page. What you said is being written out below; press Download when you're ready to send it.");
     writeOut(rv);
   }
 
@@ -541,15 +556,15 @@ async function start(src) {
   let memOnly = false;       // this browser gave no storage (a private window): reviews last only while the page is open
   const pad = n => String(n).padStart(2, "0");
   const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; };
-  const noteOf = d => ({ t: d.t, w: d.w ?? null, text: d.text, strokes: d.strokes, ...(d.cut ? { t2: d.t2, cut: true } : d.range ? { t2: d.t2, range: true } : {}), ...(d.kind ? { kind: d.kind, group: d.group } : {}) });
+  const noteOf = d => ({ ...(d.nid ? { nid: d.nid } : {}), t: d.t, w: d.w ?? null, text: d.text, strokes: d.strokes, ...(d.cut ? { t2: d.t2, cut: true } : d.range ? { t2: d.t2, range: true } : {}), ...(d.kind ? { kind: d.kind, group: d.group } : {}) });
   function payloadOf(extra) {
     return Object.assign({ session: SESSION, name: NAME, xml: "", fps: FPS, created: new Date().toISOString(), duration: TOTAL, source: SRC,
       reviewer: $("who").value.trim(), page: "share-2", good: [...good], segLen }, extra);
   }
   // said: null for a typed review; for a voice review { state: wait | model | run | done | error, pct, lines, error }
-  async function keep(payload, voiceSecs) {
+  async function keep(payload, voiceSecs, nids) {
     const r = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, key: KEY, file: `${SESSION}-${stamp()}.review.json`, voiceSecs: voiceSecs || 0,
-      downloaded: false, said: payload.audio ? { state: "wait" } : null, payload };
+      downloaded: false, sent: null, nids: nids || [], said: payload.audio ? { state: "wait" } : null, payload };
     saved.push(r); if (r.said) openSaid.add(r.id);
     renderSaved();
     if (!(await held.put(r))) { memOnly = true; renderSaved(); }
@@ -579,17 +594,21 @@ async function start(src) {
     return '<div class="wait">Writing out what you said… You can download the review without waiting.</div>';
   }
   function renderSaved() {
-    const left = saved.filter(r => !r.downloaded).length;
-    $("rvcount").textContent = saved.length ? `${saved.length} saved · ${left} not downloaded` : "";
+    const share = SH && SH.on, left = saved.filter(r => !(share ? r.sent : r.downloaded)).length;
+    $("rvcount").textContent = saved.length ? `${saved.length} saved · ${left} not ${share ? "sent" : "downloaded"}` : "";
+    $("reviewshelp").innerHTML = share
+      ? "Press <b>Send</b> on a saved review and it reaches the editor straight away, with your typed notes, cuts, sections, drawings and what you said written out. <b>Download</b> keeps a file copy; it is also the way to pass on the voice recording itself."
+      : "A saved review is kept on this page, in this browser, until you download it. When you're done, press <b>Download</b> and send the <b>.review.json</b> file to the person who gave you this link (Discord, email, anything).";
     $("saved").innerHTML = saved.map((r, i) => {
       const n = r.payload.notes.length, d = r.payload.strokes.length, open = openSaid.has(r.id);
       const when = new Date(r.payload.created).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       return `<div class="rv${open ? " open" : ""}" data-id="${r.id}"><b>Review ${i + 1}</b>
         <span class="meta">${when} · ${r.voiceSecs ? fmt(r.voiceSecs).slice(0, -3) + " of voice · " : ""}${n} typed note${n === 1 ? "" : "s"} · ${d} drawing${d === 1 ? "" : "s"}</span>
-        <span class="chip${r.downloaded ? " ok" : ""}">${r.downloaded ? "downloaded" : "not downloaded"}</span><span class="spacer"></span>
+        ${share ? `<span class="chip${r.sent ? " ok" : ""}">${r.sent ? "sent" : r.sendWhenReady ? "sending soon" : "not sent"}</span>` : ""}<span class="chip${r.downloaded ? " ok" : ""}">${r.downloaded ? "downloaded" : "not downloaded"}</span><span class="spacer"></span>
         ${r.said ? `<button class="small" data-act="said">${open ? "▴" : "▾"} What I said</button>` : ""}
         ${n || (r.said && r.said.state === "done" && r.said.lines.length) ? '<button class="small" data-act="text" title="The notes as plain text with their times, to paste in a chat">Copy as text</button>' : ""}
-        <button class="small primary" data-act="dl" title="Save this review as a file to send back">${r.downloaded ? "Download again" : "Download"}</button>
+        ${share ? `<button class="small primary" data-act="send" title="Send this review to the editor now">${r.sent ? "Send again" : "Send"}</button>` : ""}
+        <button class="small${share ? "" : " primary"}" data-act="dl" title="Save this review as a file">${r.downloaded ? "Download again" : "Download"}</button>
         <button class="small" data-act="del" title="Remove this review from the page">Delete</button>
         <div class="said">${saidHtml(r)}</div></div>`; }).join("") +
       (memOnly && left ? '<div class="meta" style="margin-top:8px; color:var(--rec)">This browser won\'t keep reviews after the page closes (a private window does that). Download before you leave.</div>' : "");
@@ -602,8 +621,9 @@ async function start(src) {
     if (act === "said") { openSaid.has(r.id) ? openSaid.delete(r.id) : openSaid.add(r.id); renderSaved(); }
     if (act === "text") copyText(`Notes on ${NAME}\n` + textOf(r), "Notes copied as text.");
     if (act === "dl") download(r);
+    if (act === "send" && SH) SH.send(r);
     if (act === "retry") writeOut(r);
-    if (act === "del" && (r.downloaded || confirm(`Delete review ${i + 1}? It hasn't been downloaded, so it would be gone.`))) {
+    if (act === "del" && (r.downloaded || r.sent || confirm(`Delete review ${i + 1}? It hasn't been sent or downloaded, so it would be gone.`))) {
       saved.splice(i, 1); held.del(r.id); renderSaved(); msg(`Review ${i + 1} deleted.`);
     }
   };
@@ -678,7 +698,7 @@ self.onmessage = async e => {
         r.said = { state: "done", lines: linesOf(r, m.chunks) };
         r.payload.said = r.said.lines; r.payload.saidBy = `${STT.model} ${STT.dtype}, in the reviewer's browser`;
       } else r.said = { state: "error", error: m.error || "unknown error" };
-      if (saved.includes(r)) { held.put(r); renderSaved(); }
+      if (saved.includes(r)) { held.put(r); renderSaved(); if (r.sendWhenReady && SH) SH.send(r); }
     });
   }
   // reviews saved on an earlier visit to this video
@@ -699,7 +719,7 @@ self.onmessage = async e => {
   }
   $("who").value = store.get("reviewer") || "";
   $("who").addEventListener("input", () => store.set("reviewer", $("who").value));
-  window.addEventListener("beforeunload", e => { if (rec || (memOnly && saved.some(r => !r.downloaded))) { e.preventDefault(); e.returnValue = ""; } });
+  window.addEventListener("beforeunload", e => { if (rec || (memOnly && saved.some(r => !r.downloaded && !r.sent))) { e.preventDefault(); e.returnValue = ""; } });
   window.__review = { saved, held, get T() { return T; }, get playing() { return playing; }, P };
 
   // ---------- UI ----------
@@ -725,11 +745,17 @@ self.onmessage = async e => {
     drawMarks();
   }
   function drawMarks() {
-    document.querySelectorAll(".mark, .cutreg, .hlreg, .nmark").forEach(m => m.remove());
+    document.querySelectorAll(".mark, .cutreg, .hlreg, .nmark, .omark, .oreg").forEach(m => m.remove());
     const reg = (a, b, open, cls) => { const m = document.createElement("div"); m.className = (cls || "cutreg") + (open ? " open" : ""); m.style.left = X(a) + "%"; if (!open) m.style.width = ((b - a) / VS() * 100) + "%"; $("bar").appendChild(m); };
     for (const d of drafts) if (d.cut) reg(d.t, d.t2); else if (d.range) reg(d.t, d.t2, false, "hlreg"); else { const m = document.createElement("div"); m.className = "nmark"; m.style.left = X(d.t) + "%"; $("bar").appendChild(m); }
     if (cutIn !== null) reg(cutIn, cutIn, true);
     if (hlIn !== null) reg(hlIn, hlIn, true, "hlreg");
+    if (SH) for (const o of SH.others.values()) {   // other reviewers' notes, in teal along the top of the bar
+      const m = document.createElement("div");
+      if (o.t2 != null && o.t2 > o.t) { m.className = "oreg"; m.style.left = X(o.t) + "%"; m.style.width = ((o.t2 - o.t) / VS() * 100) + "%"; }
+      else { m.className = "omark"; m.style.left = X(o.t) + "%"; }
+      $("bar").appendChild(m);
+    }
     for (const s of strokes) { const m = document.createElement("div"); m.className = "mark"; m.style.left = X(s.t) + "%"; $("bar").appendChild(m); }
   }
   let lastSeg = -1;
@@ -885,6 +911,7 @@ self.onmessage = async e => {
   $("drafts").addEventListener("mousedown", e => { if (e.target.classList.contains("ed")) return; draftsDown = true; setTimeout(() => { draftsDown = false; }, 400); });
   function renderDrafts() {
     const el = $("drafts");
+    if (SH) SH.changed();
     drawMarks(); stash();
     const loose = strokes.filter((s, i) => !drafts.some(d => d.strokes.includes(i))).length;
     if (!drafts.length && !loose) { el.innerHTML = ""; return; }
@@ -894,7 +921,7 @@ self.onmessage = async e => {
       (loose ? `<div class="dn"><span class="meta">${loose} drawing${loose === 1 ? "" : "s"} with no note (the red dot${loose === 1 ? "" : "s"} on the timeline)</span><span class="x" id="dropLoose" title="Remove these drawings">×</span></div>` : "") +
       (rec ? `<div class="bar2 meta">These notes will be saved with the voice review you're recording.</div>`
            : `<div class="bar2"><button class="primary small" id="saveWritten">Save review (${count})</button>
-              <span class="meta">Saved reviews wait below until you download them.</span></div>`);
+              <span class="meta">${SH && SH.on ? "Saved reviews wait below until you send them." : "Saved reviews wait below until you download them."}</span></div>`);
   }
   $("drafts").onclick = e => {
     const row = e.target.closest(".dn");
@@ -915,10 +942,12 @@ self.onmessage = async e => {
     }
     if (row && e.target.classList.contains("x")) { drafts.splice(+row.dataset.i, 1); renderDrafts(); return; }
     if (e.target.id === "saveWritten") {   // every drawing is saved, with or without a note
+      if (SH) SH.changed();
       const notes = drafts.map(d => Object.assign(noteOf(d), { w: null }));
-      keep(payloadOf({ events: [], strokes: strokes.map(s => Object.assign({}, s, { w0: null, w1: null })), notes, audio: "" }));
+      if (SH) SH.settle(drafts, "saved");
+      keep(payloadOf({ events: [], strokes: strokes.map(s => Object.assign({}, s, { w0: null, w1: null })), notes, audio: "" }), 0, drafts.map(d => d.nid).filter(Boolean));
       drafts.length = 0; strokes.length = 0; renderDrafts(); drawMarks(); clearInk(); store.del(STASH);
-      msg("Review saved on this page (below). Add more, or press Download when you're ready to send it.");
+      msg(SH && SH.on ? "Review saved on this page (below). Add more, or press Send when you're ready." : "Review saved on this page (below). Add more, or press Download when you're ready to send it.");
     }
   };
   setInterval(() => { $("noteAt").textContent = fmtS(noteT ?? T); }, 100);
@@ -932,6 +961,191 @@ self.onmessage = async e => {
       msg("What you noted last time and never saved is back: " + [drafts.length ? `${drafts.length} note${drafts.length === 1 ? "" : "s"}` : "", strokes.length ? `${strokes.length} drawing${strokes.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ") + ".");
     }
   } catch (e) {}
+
+  // ---------- shared notes (added 2026-11-20): an online store, so everyone with the link sees each other's notes ----------
+  // Firestore in the Firebase project edit-review-notes. The key is public by design; the security rules decide what
+  // anyone can do (review-tool/firestore.rules): each browser signs in anonymously, anyone who has the link can read a
+  // video's notes and add their own, only the browser that wrote a note can change it, and a send can only be read by
+  // the editor's PC. Only YouTube and Drive links share (the video's id is the key); a file or address stays local.
+  const SHARE = { apiKey: "AIzaSyBgn35G-XOrgrVZb97GhnB1LM1DRQmAKsQ", project: "edit-review-notes" };
+  const VID = SRC.kind === "youtube" ? "yt-" + SRC.id : SRC.kind === "drive" ? "drive-" + SRC.id : null;
+  SH = (function () {
+    const DOCS = `projects/${SHARE.project}/databases/(default)/documents`, FS = "https://firestore.googleapis.com/v1/";
+    const synced = new Map(), exists = new Set(), others = new Map();
+    let auth = null, token = null, until = 0, cursor = null, timer = 0, dirty = false, busy = false, first = true;
+    let state = VID ? "connecting" : "off";
+    const rid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    const whoName = () => ($("who").value.trim() || "Someone").slice(0, 60);
+    async function api(url, body, form) {
+      const h = {};
+      if (token && !form) h.Authorization = "Bearer " + token;
+      let b;
+      if (form) { h["Content-Type"] = "application/x-www-form-urlencoded"; b = new URLSearchParams(body).toString(); }
+      else if (body !== undefined) { h["Content-Type"] = "application/json"; b = JSON.stringify(body); }
+      const res = await fetch(url, { method: body === undefined ? "GET" : "POST", headers: h, body: b });
+      const j = await res.json().catch(() => null);
+      if (!res.ok) { const e = new Error((j && j.error && (j.error.message || j.error.status)) || "HTTP " + res.status); e.status = res.status; throw e; }
+      return j;
+    }
+    async function signIn() {
+      try { auth = JSON.parse(store.get("shared-auth") || "null"); } catch (e) { auth = null; }
+      if (!auth) {
+        const r = await api(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${SHARE.apiKey}`, { returnSecureToken: true });
+        auth = { uid: r.localId, refresh: r.refreshToken }; token = r.idToken; until = Date.now() + (+r.expiresIn - 300) * 1000;
+        store.set("shared-auth", JSON.stringify(auth));
+      }
+    }
+    async function fresh() {
+      if (token && Date.now() < until) return;
+      token = null;
+      const r = await api(`https://securetoken.googleapis.com/v1/token?key=${SHARE.apiKey}`, { grant_type: "refresh_token", refresh_token: auth.refresh }, true);
+      token = r.id_token; until = Date.now() + (+r.expires_in - 300) * 1000;
+      if (r.refresh_token && r.refresh_token !== auth.refresh) { auth.refresh = r.refresh_token; store.set("shared-auth", JSON.stringify(auth)); }
+    }
+    const fs = v => v === null || v === undefined ? { nullValue: null } : typeof v === "boolean" ? { booleanValue: v }
+      : typeof v === "number" ? { doubleValue: v } : typeof v === "string" ? { stringValue: v }
+      : Array.isArray(v) ? { arrayValue: { values: v.filter(x => x !== undefined).map(fs) } }
+      : { mapValue: { fields: Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined).map(([k, x]) => [k, fs(x)])) } };
+    const unfs = v => { const [k, x] = Object.entries(v)[0]; return k === "nullValue" ? null : k === "integerValue" ? +x : k === "arrayValue" ? (x.values || []).map(unfs)
+      : k === "mapValue" ? Object.fromEntries(Object.entries(x.fields || {}).map(([a, b]) => [a, unfs(b)])) : x; };
+    const flat = s => ({ t: s.t, color: s.color, pts: s.pts.flat().map(x => +(+x).toFixed(4)) });
+    function docOf(d, st, pool) {   // a note as the store keeps it; pool = the drawings its stroke numbers point into
+      return { uid: auth.uid, who: whoName(), t: d.t, ...((d.cut || d.range) && d.t2 != null ? { t2: d.t2 } : {}), type: d.cut ? "cut" : d.range ? "range" : "note",
+        text: String(d.text || "").slice(0, 2000), ...(d.kind ? { kind: String(d.kind).slice(0, 60), group: String(d.group || "").slice(0, 20) } : {}),
+        strokes: (d.strokes || []).map(i => pool[i]).filter(Boolean).slice(0, 30).map(flat),
+        session: SESSION.slice(0, 120), title: String(NAME).slice(0, 200), state: st, client: "share-3" };
+    }
+    const noteDoc = (d, st) => docOf(d, st, strokes);
+    async function write(nid, doc) {   // create the note, or update it when it already exists (only ours: the rules check)
+      const name = `${DOCS}/videos/${VID}/notes/${nid}`, fields = Object.fromEntries(Object.entries(doc).map(([k, x]) => [k, fs(x)]));
+      const upd = { update: { name, fields }, updateTransforms: [{ fieldPath: "updated", setToServerValue: "REQUEST_TIME" }] };
+      if (!exists.has(nid)) {
+        try {
+          await api(`${FS}${DOCS}:commit`, { writes: [Object.assign({}, upd, { updateTransforms: upd.updateTransforms.concat([{ fieldPath: "created", setToServerValue: "REQUEST_TIME" }]), currentDocument: { exists: false } })] });
+          exists.add(nid); return;
+        } catch (e) { if (e.status !== 400 && e.status !== 409) throw e; exists.add(nid); }   // already there: update it
+      }
+      const mask = ["uid", "who", "t", "t2", "type", "text", "kind", "group", "strokes", "session", "title", "state", "client"];
+      await api(`${FS}${DOCS}:commit`, { writes: [Object.assign({}, upd, { updateMask: { fieldPaths: mask }, currentDocument: { exists: true } })] });
+    }
+    async function flush() {   // what changed in my notes since the last write goes online
+      if (!VID || !auth || busy) { dirty = true; return; }
+      busy = true; dirty = false;
+      try {
+        await fresh();
+        for (const d of drafts) if (!d.nid) d.nid = rid();
+        const now = new Map(drafts.map(d => [d.nid, d]));
+        for (const [nid, d] of now) {
+          const doc = noteDoc(d, "draft"), sig = JSON.stringify(doc);
+          if (synced.get(nid) !== sig) { await write(nid, doc); synced.set(nid, sig); }
+        }
+        for (const nid of [...synced.keys()]) if (!now.has(nid)) {   // removed from the list: kept online as removed
+          await write(nid, { uid: auth.uid, who: whoName(), t: 0, type: "note", text: "", session: SESSION.slice(0, 120), state: "deleted", client: "share-3" });
+          synced.delete(nid);
+        }
+        status("ok");
+      } catch (e) { dirty = true; status("bad", e.message); }
+      busy = false;
+      store.set(STASH, JSON.stringify({ drafts, strokes }));   // keeps the note ids just given out
+      if (dirty) setTimeout(flush, 4000);
+    }
+    function changed() {
+      for (const d of drafts) if (!d.nid) d.nid = rid();   // every note has its id from the start (it goes in the review too)
+      if (!VID || state === "off") return;
+      clearTimeout(timer); timer = setTimeout(flush, 700); if (auth) status("saving");
+    }
+    function settle(list, st) {   // notes leaving the list inside a saved review: marked saved online, not removed
+      for (const d of list) if (!d.nid) d.nid = rid();
+      if (!VID) return;
+      const items = list.map(d => [d.nid, noteDoc(d, st)]);
+      for (const [nid] of items) synced.delete(nid);
+      if (!auth) return;
+      (async () => { try { await fresh(); for (const [nid, doc] of items) await write(nid, doc); } catch (e) {} })();
+    }
+    async function poll() {   // other reviewers' notes, fetched by what changed since the last look
+      if (!VID || !auth || document.hidden) return;
+      try {
+        await fresh();
+        const q = { from: [{ collectionId: "notes" }], orderBy: [{ field: { fieldPath: "updated" } }], limit: 300 };
+        if (cursor) q.where = { fieldFilter: { field: { fieldPath: "updated" }, op: "GREATER_THAN", value: { timestampValue: cursor } } };
+        const rows = await api(`${FS}${DOCS}/videos/${VID}:runQuery`, { structuredQuery: q });
+        const mine = [];
+        for (const x of rows) if (x.document) {
+          const nid = x.document.name.split("/").pop(), d = Object.fromEntries(Object.entries(x.document.fields || {}).map(([k, v]) => [k, unfs(v)]));
+          cursor = d.updated || cursor;
+          if (d.uid === auth.uid) { exists.add(nid); if (first && d.state === "draft") mine.push([nid, d]); continue; }
+          if (d.state === "deleted") others.delete(nid); else others.set(nid, Object.assign(d, { nid }));
+        }
+        if (first) {   // my notes the store has and this browser lost (a crash with no local copy): back in the list
+          const have = new Set(drafts.map(d => d.nid));
+          const back = mine.filter(([nid]) => !have.has(nid));
+          for (const [nid, d] of back) drafts.push({ nid, t: d.t, ...(d.t2 != null ? { t2: d.t2 } : {}), ...(d.type === "cut" ? { cut: true } : d.type === "range" ? { range: true } : {}),
+            ...(d.kind ? { kind: d.kind, group: d.group } : {}), w: null, text: d.text || "", strokes: [] });
+          for (const [nid, d] of back) synced.set(nid, "");
+          if (back.length) { drafts.sort((a, b) => a.t - b.t); renderDrafts(); msg(`${back.length} note${back.length === 1 ? "" : "s"} you wrote earlier came back from the shared store.`); }
+          first = false;
+          if (drafts.length) changed();
+        }
+        renderOthers(); drawMarks();
+        if (state !== "saving") status("ok");
+      } catch (e) { status("bad", e.message); }
+    }
+    function renderOthers() {
+      const list = [...others.values()].filter(o => o.state !== "deleted").sort((a, b) => a.t - b.t);
+      $("others").innerHTML = list.length ? `<div class="hd">Notes from others on this video (${list.length})</div>` + list.map(o =>
+        `<div class="on" data-t="${o.t}" title="Jump the video here"><b>${fmtS(o.t)}${o.t2 != null ? "–" + fmtS(o.t2) : ""}</b><span class="who">${esc(o.who || "Someone")}</span>`
+        + `<span>${o.type === "cut" ? "✂ " : o.type === "range" ? "▭ " : ""}${esc(o.text || (o.kind || ""))}</span>`
+        + `${o.strokes && o.strokes.length ? ' <span class="meta">(+ drawing)</span>' : ""}<span class="spacer"></span><span class="meta">${o.state === "sent" ? "sent" : o.state === "saved" ? "saved" : "writing"}</span></div>`).join("") : "";
+    }
+    $("others").onclick = e => {
+      const row = e.target.closest(".on"); if (!row) return;
+      if (playing || want) setPlaying(false);
+      seek(+row.dataset.t);
+      const o = [...others.values()].find(x => Math.abs(x.t - +row.dataset.t) < 0.01 && x.strokes && x.strokes.length);
+      if (o) for (const s of o.strokes) { const pts = []; for (let i = 0; i + 1 < s.pts.length; i += 2) pts.push([s.pts[i], s.pts[i + 1]]); paint({ color: s.color, pts }); }
+    };
+    function status(st, why) {
+      state = st;
+      const el = $("sharestate");
+      if (st === "off") el.innerHTML = "Notes stay on this computer. Sharing works when the review is opened from a YouTube or Google Drive link.";
+      else if (st === "connecting") el.innerHTML = "Connecting to the shared notes…";
+      else if (st === "bad") el.innerHTML = `<span class="bad">Shared notes can't be reached right now${why ? " (" + esc(String(why).slice(0, 80)) + ")" : ""}.</span> Your notes are kept on this computer and go online when it's back.`;
+      else el.innerHTML = `<span class="on">● Shared.</span> Anyone with this link sees these notes and can add their own. ${st === "saving" ? "Saving…" : "✓ Saved online."}`;
+    }
+    async function send(r) {   // the review to the editor's inbox: typed notes, sections, cuts, drawings and the written-out voice
+      if (!auth) { msg("Shared notes aren't connected, so Send can't work right now. Download the review instead."); return; }
+      if (r.said && r.said.state !== "done" && r.said.state !== "error") { r.sendWhenReady = true; held.put(r); renderSaved(); msg("This review will be sent as soon as what you said is written out."); return; }
+      r.sendWhenReady = false;
+      const rv = Object.assign({}, r.payload);
+      delete rv.audio; delete rv.events; delete rv.audioType;
+      rv.reviewer = whoName();
+      rv.strokes = (rv.strokes || []).map(st => Object.assign({}, st, { pts: (st.pts || []).flat() }));
+      if (r.said && r.said.state === "done") rv.said = r.said.lines;
+      if (JSON.stringify(rv).length > 900000) rv.strokes = rv.strokes.map(st => Object.assign({}, st, { pts: [] }));   // a document holds 1 MB at most
+      try {
+        await fresh();
+        const name = `${DOCS}/inbox/${rid()}`;
+        await api(`${FS}${DOCS}:commit`, { writes: [{ update: { name, fields: { uid: fs(auth.uid), who: fs(whoName()), vid: fs(VID), review: fs(rv) } },
+          updateTransforms: [{ fieldPath: "at", setToServerValue: "REQUEST_TIME" }], currentDocument: { exists: false } }] });
+        r.sent = new Date().toISOString(); held.put(r); renderSaved();
+        for (const n of r.payload.notes) if (n.nid) write(n.nid, docOf(n, "sent", r.payload.strokes)).catch(() => {});   // others see "sent"
+        msg(r.said && r.said.state === "error" ? "Sent, without what you said (it couldn't be written out here). Download the review and pass the file on too, so the recording reaches the editor."
+          : "Sent. The editor has your review now.");
+      } catch (e) { msg(`Couldn't send (${String(e.message).slice(0, 80)}). Your review is still here: try again in a moment, or Download it.`); }
+    }
+    async function start() {
+      if (!VID) { status("off"); return; }
+      status("connecting");
+      try { await signIn(); await fresh(); status("ok"); await poll(); }
+      catch (e) { status("bad", e.message); setTimeout(start, 15000); return; }
+      setInterval(poll, 20000);
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+      if (dirty) flush();
+    }
+    return { changed, settle, send, start, others, get on() { return !!VID && !!auth; } };
+  })();
+  $("who").addEventListener("input", () => { if (SH) SH.changed(); });
+  SH.start().then(() => renderSaved());
 
   const v = store.get("reviewVol"); if (v !== null) $("vol").value = v;
   $("vol").addEventListener("input", () => store.set("reviewVol", $("vol").value));
