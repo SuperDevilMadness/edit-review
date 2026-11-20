@@ -98,7 +98,7 @@
   #drafts .bar2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
   .tx.editable { cursor: text; border-bottom: 1px dashed transparent; }
   .tx.editable:hover { border-bottom-color: var(--dim); }
-  input.ed { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--accent); border-radius: 4px; padding: 3px 7px; font: inherit; }
+  input.ed { flex: 1; min-width: 0; width: min(60vw, 520px); background: var(--bg); color: var(--text); border: 1px solid var(--accent); border-radius: 4px; padding: 3px 7px; font: inherit; }
   .shortcuts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; padding: 9px 12px; background: var(--panel); border-radius: 6px; font-size: 12px; color: var(--text); }
   .shortcuts .dimtxt { color: var(--dim); }
   .keys { margin-top: 14px; color: var(--dim); font-size: 12px; }
@@ -873,11 +873,16 @@ self.onmessage = async e => {
     box.className = "ed"; box.value = text; box.autocomplete = "off"; if (hint) box.placeholder = hint;
     span.replaceWith(box); box.focus(); box.setSelectionRange(text.length, text.length);
     let done = false;
-    const finish = keep => { if (done) return; done = true; const v = box.value.trim(); save(keep && v && v !== text ? v : null); };
+    const finish = keep => { if (done) return; done = true; if (openEdit === finish) openEdit = null; const v = box.value.trim(); save(keep && v && v !== text ? v : null); };
+    openEdit = finish;
     box.addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); finish(true); } if (e.key === "Escape") finish(false); });
     box.addEventListener("click", e => e.stopPropagation());
-    box.addEventListener("blur", () => finish(true));
+    // Saving redraws the list. A click that lands in the list (Save review, x, another note) would be lost if the
+    // redraw came first, so that click saves the text itself (the list's click handler) before it acts.
+    box.addEventListener("blur", () => { if (draftsDown) setTimeout(() => finish(true), 500); else finish(true); });
   }
+  let openEdit = null, draftsDown = false;
+  $("drafts").addEventListener("mousedown", e => { if (e.target.classList.contains("ed")) return; draftsDown = true; setTimeout(() => { draftsDown = false; }, 400); });
   function renderDrafts() {
     const el = $("drafts");
     drawMarks(); stash();
@@ -893,9 +898,10 @@ self.onmessage = async e => {
   }
   $("drafts").onclick = e => {
     const row = e.target.closest(".dn");
+    if (openEdit) openEdit(true);   // a note still being typed: keep its text first (this redraws the list)
     if (row && e.target.classList.contains("tx")) {
-      const i = +row.dataset.i;
-      editInline(e.target, drafts[i].text, v => { if (v) { drafts[i].text = v; msg("Note changed."); } renderDrafts(); });
+      const i = +row.dataset.i, span = $("drafts").querySelector(`.dn[data-i="${i}"] .tx`);
+      if (span) editInline(span, drafts[i].text, v => { if (v) { drafts[i].text = v; msg("Note changed."); } renderDrafts(); });
       return;
     }
     if (row && e.target.classList.contains("pv")) { const d = drafts[+row.dataset.i]; d.range ? playRange(d) : previewCut(d); return; }

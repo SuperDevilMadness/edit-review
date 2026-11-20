@@ -45,7 +45,7 @@ there next time. Notes you typed but didn't save come back the same way.
 - A voice review is a big file: about 1.3 MB a minute.
 - Writing out what you said happens on your own computer; nothing is uploaded. The first time, the page
   downloads a speech-to-text model (about 80 MB, kept by the browser afterwards) from jsDelivr and Hugging Face.
-  It is English only, takes roughly a sixth of the recording's length, and is there for you to check yourself:
+  It is English only, takes roughly a quarter of the recording's length, and is there for you to check yourself:
   you can download the review without waiting for it, and the editor's side transcribes the recording again.
 - A private window keeps saved reviews only while the page is open; the page says so.
 - `quick_notes.json` is the list of Fix and Idea buttons; edit it to change them.
