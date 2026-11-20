@@ -60,6 +60,16 @@
   .ticklbl { position: absolute; bottom: 6px; font-size: 9px; color: var(--dim); margin-left: 2px; pointer-events: none; }
   .cutreg { position: absolute; top: 0; bottom: 0; background: #ff4d5e55; border-left: 2px solid var(--rec); border-right: 2px solid var(--rec); pointer-events: none; }
   .cutreg.open { background: none; border-right: none; }
+  .hlreg { position: absolute; top: 0; bottom: 0; background: #ffd43b33; border-left: 2px solid #ffd43b; border-right: 2px solid #ffd43b; pointer-events: none; }
+  .hlreg.open { background: none; border-right: none; }
+  .chip { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
+  .chip.ok { border-color: var(--good); color: var(--good); }
+  .said { flex-basis: 100%; display: none; margin-top: 4px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .rv.open .said { display: block; }
+  .said .ln { display: flex; gap: 10px; padding: 4px 6px; border-radius: 4px; cursor: pointer; }
+  .said .ln:hover { background: #ffffff10; }
+  .said .ln b { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; min-width: 52px; }
+  .said .wait { color: var(--dim); font-size: 12px; padding: 4px 6px; }
   #drafts .dn .pv { color: var(--rec); cursor: pointer; white-space: nowrap; }
   .head { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; }
   .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
@@ -160,6 +170,8 @@
       <button id="noteAdd">Add note</button>
       <button id="cutIn" title="Mark where a cut should start (I)">✂ Cut from here</button>
       <button id="cutOut" title="Mark where the cut ends and add it as a note (O)">to here</button>
+      <button id="hlIn" title="Mark where a section you want to note starts (S)">▭ Section from here</button>
+      <button id="hlOut" title="Mark where the section ends and write a note for it (E)">to here</button>
     </div>
     <div class="quick" id="quick"></div>
     <div id="drafts"></div>
@@ -168,12 +180,12 @@
       <span><kbd>Space</kbd> play / pause</span><span><kbd>←</kbd> <kbd>→</kbd> back / forward 2 s</span>
       <span><kbd>,</kbd> <kbd>.</kbd> one frame</span><span><kbd>[</kbd> <kbd>]</kbd> previous / next segment</span>
       <span><kbd>L</kbd> loop segment</span><span><kbd>G</kbd> segment good</span>
-      <span><kbd>C</kbd> clear drawing</span><span><kbd>N</kbd> type a note</span><span><kbd>I</kbd> <kbd>O</kbd> cut from / to here</span><span><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> timeline zoom</span><span><kbd>R</kbd> pause / resume voice review</span>
+      <span><kbd>C</kbd> clear drawing</span><span><kbd>N</kbd> type a note</span><span><kbd>I</kbd> <kbd>O</kbd> cut from / to here</span><span><kbd>S</kbd> <kbd>E</kbd> section to note: start / end</span><span><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> timeline zoom</span><span><kbd>R</kbd> pause / resume voice review</span>
       <span class="dimtxt">Draw on the picture to point (it pauses the video).</span>
     </div>
     <section class="reviews">
-      <h2>Sending your review</h2>
-      <div class="meta">Saving a review downloads a <b>.review.json</b> file. Send that file to the person who gave you this link (Discord, email, anything). Nothing leaves this page by itself.</div>
+      <h2>Your reviews <span class="meta" id="rvcount"></span></h2>
+      <div class="meta">A saved review is kept on this page, in this browser, until you download it. When you're done, press <b>Download</b> and send the <b>.review.json</b> file to the person who gave you this link (Discord, email, anything). Nothing leaves this page by itself.</div>
       <div style="margin-top:8px"><input type="text" id="who" placeholder="Your name (optional, saved in the file)" autocomplete="off" style="width:280px; max-width:100%"></div>
       <div id="saved"></div>
     </section>
@@ -188,6 +200,22 @@ const clean = s => String(s || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").repl
 const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
                 set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }, del(k) { try { localStorage.removeItem(k); } catch (e) {} } };
 const YT_ID = /^[A-Za-z0-9_-]{11}$/, DRIVE_ID = /^[A-Za-z0-9_-]{15,}$/;
+// Saved reviews wait in this browser's own database until they are downloaded (a voice review is megabytes: too big
+// for localStorage). Every call answers null when the browser gives no database, and the page then keeps them in memory.
+const held = {
+  db: null,
+  open() { return new Promise(res => { try { const q = indexedDB.open("edit-review", 1);
+    q.onupgradeneeded = () => q.result.createObjectStore("reviews", { keyPath: "id" });
+    q.onsuccess = () => res(q.result); q.onerror = q.onblocked = () => res(null); } catch (e) { res(null); } }); },
+  async run(mode, fn) {
+    this.db = this.db || await this.open();
+    if (!this.db) return null;
+    return new Promise(res => { try { const t = this.db.transaction("reviews", mode), q = fn(t.objectStore("reviews"));
+      t.oncomplete = () => res(q.result === undefined ? true : q.result); t.onerror = t.onabort = () => res(null); } catch (e) { res(null); } });
+  },
+  all() { return this.run("readonly", s => s.getAll()); },
+  put(r) { return this.run("readwrite", s => s.put(r)); },
+  del(id) { return this.run("readwrite", s => s.delete(id)); } };
 
 // A pasted link (or a bare YouTube id) -> where the video is. null = not something this page can play.
 function parseLink(raw) {
@@ -361,20 +389,21 @@ async function start(src) {
   const X = t => ((t - V0) / VS() * 100);
   const good = new Set(JSON.parse(store.get("good:" + SESSION) || "[]"));
   let cutIn = null, cutPrev = null;   // a cut range being marked; a marked cut being played across
+  let hlIn = null, rangePlay = null;  // a section being marked for a note; a marked section being played once
   const segOf = t => Math.floor(t / segLen);
   const nseg = () => Math.ceil(TOTAL / segLen);
   const ink = $("ink"), ictx = ink.getContext("2d");
   function showWant() { $("play").textContent = want ? "Pause" : "Play"; }
   function setPlaying(p) {
     want = p; loopSeg = segOf(T);
-    if (!p) cutPrev = null;
+    if (!p) cutPrev = rangePlay = null;
     if (p) { clearInk(); P.play(); } else P.pause();
     showWant();
     if (p && P.kind === "youtube") setTimeout(() => {   // phones: YouTube only starts from a tap on the video itself
       if (want && !P.playing() && T < 0.05) { ink.style.pointerEvents = "none"; msg("Tap the video once to start it."); }
     }, 2500);
   }
-  P.onstate = p => { want = p; showWant(); if (p) ink.style.pointerEvents = ""; else cutPrev = null; };
+  P.onstate = p => { want = p; showWant(); if (p) ink.style.pointerEvents = ""; else cutPrev = rangePlay = null; };
   P.onerror = m => msg(m);
   function seek(t) {
     T = Math.max(0, Math.min(TOTAL - 0.05, t)); loopSeg = segOf(T); P.seek(T); log("seek", {});
@@ -411,6 +440,10 @@ async function start(src) {
         if (T < cutPrev.a - 2.5 || T > cutPrev.b + 2.5) cutPrev = null;
         else if (T >= cutPrev.a && T < cutPrev.b) { const c = cutPrev; seek(c.b); cutPrev = c; }
         else if (T >= cutPrev.b + 2) setPlaying(false);
+      }
+      if (rangePlay) {   // playing a marked section once: stop at its end
+        if (T < rangePlay.a - 0.5 || T > rangePlay.b + 1) rangePlay = null;
+        else if (T >= rangePlay.b) setPlaying(false);
       }
     }
     ui();
@@ -496,38 +529,169 @@ async function start(src) {
     $("rec").textContent = "● Start voice review"; $("recbadge").classList.remove("on");
     const blob = new Blob(chunks, { type: r.mimeType || "audio/webm" });
     const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(",")[1]); fr.readAsDataURL(blob); });
-    saveFile(payloadOf({ events, strokes: strokes.slice(), notes: drafts.map(noteOf), audio: b64, audioType: r.mimeType || "" }), dur);
+    const rv = await keep(payloadOf({ events, strokes: strokes.slice(), notes: drafts.map(noteOf), audio: b64, audioType: r.mimeType || "" }), dur);
     drafts.length = 0; strokes.length = 0; renderDrafts(); drawMarks(); clearInk(); store.del(STASH);
+    msg("Voice review saved on this page. What you said is being written out below; press Download when you're ready to send it.");
+    writeOut(rv);
   }
 
-  // ---------- saving: a file the reviewer sends back (there is no server behind this page) ----------
-  const saved = [];
+  // ---------- saved reviews: kept on this page until the reviewer downloads them (there is no server behind it) ----------
+  const KEY = SRC.kind + ":" + (SRC.id || SRC.url || SRC.name);   // which video: the reviews shown are this video's
+  const saved = [], openSaid = new Set();
+  let memOnly = false;       // this browser gave no storage (a private window): reviews last only while the page is open
   const pad = n => String(n).padStart(2, "0");
   const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; };
-  const noteOf = d => ({ t: d.t, w: d.w ?? null, text: d.text, strokes: d.strokes, ...(d.cut ? { t2: d.t2, cut: true } : {}), ...(d.kind ? { kind: d.kind, group: d.group } : {}) });
+  const noteOf = d => ({ t: d.t, w: d.w ?? null, text: d.text, strokes: d.strokes, ...(d.cut ? { t2: d.t2, cut: true } : d.range ? { t2: d.t2, range: true } : {}), ...(d.kind ? { kind: d.kind, group: d.group } : {}) });
   function payloadOf(extra) {
     return Object.assign({ session: SESSION, name: NAME, xml: "", fps: FPS, created: new Date().toISOString(), duration: TOTAL, source: SRC,
-      reviewer: $("who").value.trim(), page: "share-1", good: [...good], segLen }, extra);
+      reviewer: $("who").value.trim(), page: "share-2", good: [...good], segLen }, extra);
   }
-  function download(s) { const a = document.createElement("a"); a.href = s.url; a.download = s.file; document.body.appendChild(a); a.click(); a.remove(); }
-  function saveFile(payload, voiceSecs) {
-    const s = { file: `${SESSION}-${stamp()}.review.json`, url: URL.createObjectURL(new Blob([JSON.stringify(payload)], { type: "application/json" })), payload, voiceSecs };
-    saved.push(s); download(s); renderSaved();
-    msg(`Review saved as ${s.file} (in your Downloads folder). Send that file to the person who gave you this link.`);
+  // said: null for a typed review; for a voice review { state: wait | model | run | done | error, pct, lines, error }
+  async function keep(payload, voiceSecs) {
+    const r = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, key: KEY, file: `${SESSION}-${stamp()}.review.json`, voiceSecs: voiceSecs || 0,
+      downloaded: false, said: payload.audio ? { state: "wait" } : null, payload };
+    saved.push(r); if (r.said) openSaid.add(r.id);
+    renderSaved();
+    if (!(await held.put(r))) { memOnly = true; renderSaved(); }
+    return r;
   }
-  const textOf = notes => notes.slice().sort((a, b) => a.t - b.t).map(n => `${fmtS(n.t)} ${n.text}`).join("\n");
+  function download(r) {
+    const who = $("who").value.trim(); if (who) r.payload.reviewer = who;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(r.payload)], { type: "application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = r.file; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    r.downloaded = true; held.put(r); renderSaved();
+    msg(`${r.file} is in your Downloads folder. Send that file to the person who gave you this link.`);
+  }
+  // typed notes and spoken lines of one review as plain text, in video order, to paste in a chat
+  function textOf(r) {
+    const rows = r.payload.notes.map(n => [n.t, `${fmtS(n.t)}${n.range ? "-" + fmtS(n.t2) : ""} ${n.text}`]);
+    if (r.said && r.said.state === "done") for (const l of r.said.lines) rows.push([l.t, `${fmtS(l.t)} (said) ${l.text}`]);
+    return rows.sort((a, b) => a[0] - b[0]).map(x => x[1]).join("\n");
+  }
+  function saidHtml(r) {
+    const s = r.said;
+    if (!s) return "";
+    if (s.state === "done") return s.lines.length ? s.lines.map(l => `<div class="ln" data-t="${l.t}" title="Jump the video here"><b>${fmtS(l.t)}</b><span>${esc(l.text)}</span></div>`).join("")
+      : '<div class="wait">No words found in this recording.</div>';
+    if (s.state === "error") return `<div class="wait">What you said couldn't be written out in this browser (${esc(s.error)}). Your recording is in the review all the same, so Download works. <button class="small" data-act="retry">Try again</button></div>`;
+    if (s.state === "model") return `<div class="wait">Getting the speech-to-text model (one time, about 80 MB)… ${Math.round(s.pct || 0)}%. You can download the review without waiting.</div>`;
+    return '<div class="wait">Writing out what you said… You can download the review without waiting.</div>';
+  }
   function renderSaved() {
-    $("saved").innerHTML = saved.map((s, i) => { const n = s.payload.notes.length, d = s.payload.strokes.length;
-      return `<div class="rv" data-i="${i}"><b class="ok">✓ ${esc(s.file)}</b>
-        <span class="meta">${s.voiceSecs ? fmt(s.voiceSecs).slice(0, -3) + " of voice · " : ""}${n} typed note${n === 1 ? "" : "s"} · ${d} drawing${d === 1 ? "" : "s"}</span><span class="spacer"></span>
-        <button class="small" data-act="again">Download again</button>${n ? '<button class="small" data-act="text" title="The typed notes as plain text with their times, to paste in a chat">Copy notes as text</button>' : ""}</div>`; }).join("");
+    const left = saved.filter(r => !r.downloaded).length;
+    $("rvcount").textContent = saved.length ? `${saved.length} saved · ${left} not downloaded` : "";
+    $("saved").innerHTML = saved.map((r, i) => {
+      const n = r.payload.notes.length, d = r.payload.strokes.length, open = openSaid.has(r.id);
+      const when = new Date(r.payload.created).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      return `<div class="rv${open ? " open" : ""}" data-id="${r.id}"><b>Review ${i + 1}</b>
+        <span class="meta">${when} · ${r.voiceSecs ? fmt(r.voiceSecs).slice(0, -3) + " of voice · " : ""}${n} typed note${n === 1 ? "" : "s"} · ${d} drawing${d === 1 ? "" : "s"}</span>
+        <span class="chip${r.downloaded ? " ok" : ""}">${r.downloaded ? "downloaded" : "not downloaded"}</span><span class="spacer"></span>
+        ${r.said ? `<button class="small" data-act="said">${open ? "▴" : "▾"} What I said</button>` : ""}
+        ${n || (r.said && r.said.state === "done" && r.said.lines.length) ? '<button class="small" data-act="text" title="The notes as plain text with their times, to paste in a chat">Copy as text</button>' : ""}
+        <button class="small primary" data-act="dl" title="Save this review as a file to send back">${r.downloaded ? "Download again" : "Download"}</button>
+        <button class="small" data-act="del" title="Remove this review from the page">Delete</button>
+        <div class="said">${saidHtml(r)}</div></div>`; }).join("") +
+      (memOnly && left ? '<div class="meta" style="margin-top:8px; color:var(--rec)">This browser won\'t keep reviews after the page closes (a private window does that). Download before you leave.</div>' : "");
   }
   $("saved").onclick = e => {
-    const row = e.target.closest(".rv"); if (!row || !e.target.dataset.act) return;
-    const s = saved[+row.dataset.i];
-    if (e.target.dataset.act === "again") download(s);
-    if (e.target.dataset.act === "text") copyText(`Notes on ${NAME}\n` + textOf(s.payload.notes), "Notes copied as text.");
+    const row = e.target.closest(".rv"); if (!row) return;
+    const i = saved.findIndex(r => r.id === row.dataset.id), r = saved[i], ln = e.target.closest(".ln"), act = e.target.dataset.act;
+    if (!r) return;
+    if (ln) { if (playing || want) setPlaying(false); seek(+ln.dataset.t); msg(`Jumped to ${fmtS(+ln.dataset.t)}.`); return; }
+    if (act === "said") { openSaid.has(r.id) ? openSaid.delete(r.id) : openSaid.add(r.id); renderSaved(); }
+    if (act === "text") copyText(`Notes on ${NAME}\n` + textOf(r), "Notes copied as text.");
+    if (act === "dl") download(r);
+    if (act === "retry") writeOut(r);
+    if (act === "del" && (r.downloaded || confirm(`Delete review ${i + 1}? It hasn't been downloaded, so it would be gone.`))) {
+      saved.splice(i, 1); held.del(r.id); renderSaved(); msg(`Review ${i + 1} deleted.`);
+    }
   };
+
+  // ---------- what was said, written out in the browser: Whisper through transformers.js, in a worker ----------
+  // Nothing is uploaded: the library and the model are downloaded once (about 80 MB, then cached) and run on this
+  // computer. It is only for the reviewer to check what they said; the editor's side transcribes the recording again.
+  const STT = { lib: "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2", model: "onnx-community/whisper-base.en", dtype: "q8" };
+  let sttWorker = null, sttChain = Promise.resolve(), sttDone = null, sttNow = null;
+  function sttStart() {
+    const code = `import { pipeline } from "${STT.lib}";
+let tr = null;
+self.onmessage = async e => {
+  const { id, audio } = e.data;
+  try {
+    if (!tr) { let last = -5; tr = pipeline("automatic-speech-recognition", "${STT.model}", { device: "wasm", dtype: "${STT.dtype}",
+      progress_callback: p => { if (p.status === "progress_total" && p.progress - last >= 2) { last = p.progress; self.postMessage({ type: "model", pct: p.progress }); } } }); }
+    const run = await tr;
+    self.postMessage({ type: "run" });
+    const out = await run(audio, { chunk_length_s: 30, stride_length_s: 5, return_timestamps: true });
+    self.postMessage({ type: "done", id, chunks: out.chunks || [] });
+  } catch (err) { tr = null; self.postMessage({ type: "error", id, error: String(err && err.message || err).slice(0, 160) }); }
+};`;
+    const w = new Worker(URL.createObjectURL(new Blob([code], { type: "text/javascript" })), { type: "module" });
+    w.onmessage = e => {
+      const m = e.data, r = sttNow;
+      if (!r) return;
+      if (m.type === "model") { r.said = { state: "model", pct: m.pct }; renderSaved(); }
+      else if (m.type === "run") { r.said = { state: "run" }; renderSaved(); }
+      else if (sttDone) sttDone(m);
+    };
+    w.onerror = () => { sttWorker = null; if (sttDone) sttDone({ type: "error", error: "the speech-to-text library didn't load; it may be blocked on this network" }); };
+    return w;
+  }
+  // a video time for a moment of the recording, from the playhead log (the same reading the editor's script makes)
+  function playheadOf(events) {
+    const clock = events.filter(e => e.w != null).sort((a, b) => a.w - b.w);
+    return w => {
+      let prev = null;
+      for (const e of clock) { if (e.w > w) break; prev = e; }
+      if (!prev) return clock.length ? clock[0].t : 0;
+      return prev.t + (prev.playing ? (w - prev.w) * (prev.rate || 1) : 0);
+    };
+  }
+  function linesOf(r, chunks) {   // Whisper's phrases joined into sentences, each placed on the moment it began
+    const at = playheadOf(r.payload.events || []), out = [];
+    let cur = null;
+    for (const c of chunks) {
+      const text = (c.text || "").trim(), a = (c.timestamp && c.timestamp[0]) || 0, b = (c.timestamp && c.timestamp[1]) ?? a;
+      if (!text || /^[\[(][^\])]*[\])]$/.test(text)) continue;            // "[BLANK_AUDIO]", "(music)"
+      if (cur && (a - cur.end > 1.2 || /[.?!]$/.test(cur.text) || cur.text.length > 240)) { out.push(cur); cur = null; }
+      if (cur) { cur.text += " " + text; cur.end = b; } else cur = { w: a, end: b, text };
+    }
+    if (cur) out.push(cur);
+    return out.map(l => ({ w: +l.w.toFixed(2), t: +Math.max(0, Math.min(TOTAL, at(l.w))).toFixed(2), text: l.text }));
+  }
+  function writeOut(r) {   // one recording at a time
+    r.said = { state: "wait" }; renderSaved();
+    sttChain = sttChain.then(async () => {
+      if (!saved.includes(r)) return;
+      let m;
+      try {
+        const buf = await (await fetch("data:application/octet-stream;base64," + r.payload.audio)).arrayBuffer();
+        const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const audio = (await new Ctx(1, 16000, 16000).decodeAudioData(buf)).getChannelData(0).slice();
+        sttWorker = sttWorker || sttStart();
+        sttNow = r;
+        m = await new Promise(res => { sttDone = res; sttWorker.postMessage({ id: r.id, audio }, [audio.buffer]); });
+      } catch (e) { m = { type: "error", error: String(e && e.message || e).slice(0, 160) }; }
+      sttDone = sttNow = null;
+      if (m.type === "done") {
+        r.said = { state: "done", lines: linesOf(r, m.chunks) };
+        r.payload.said = r.said.lines; r.payload.saidBy = `${STT.model} ${STT.dtype}, in the reviewer's browser`;
+      } else r.said = { state: "error", error: m.error || "unknown error" };
+      if (saved.includes(r)) { held.put(r); renderSaved(); }
+    });
+  }
+  // reviews saved on an earlier visit to this video
+  held.all().then(all => {
+    if (all === null) { memOnly = true; return; }
+    for (const r of all.filter(r => r.key === KEY).sort((a, b) => a.id < b.id ? -1 : 1)) {
+      saved.push(r);
+      if (r.said && r.said.state !== "done" && r.said.state !== "error") writeOut(r);   // the page closed while it was being written out
+    }
+    renderSaved();
+    const left = saved.filter(r => !r.downloaded).length;
+    if (left) msg(`${left} review${left === 1 ? "" : "s"} from last time ${left === 1 ? "is" : "are"} still here, not downloaded yet (below).`);
+  });
   function copyText(text, done) {
     const fallback = () => { let b = $("copybox"); if (!b) { b = document.createElement("textarea"); b.id = "copybox"; b.className = "copybox"; $("saved").after(b); }
       b.value = text; b.focus(); b.select(); msg("Copy the text from the box below (Ctrl+C)."); };
@@ -535,8 +699,8 @@ async function start(src) {
   }
   $("who").value = store.get("reviewer") || "";
   $("who").addEventListener("input", () => store.set("reviewer", $("who").value));
-  window.addEventListener("beforeunload", e => { if (rec) { e.preventDefault(); e.returnValue = ""; } });
-  window.__review = { saved, get T() { return T; }, get playing() { return playing; }, P };
+  window.addEventListener("beforeunload", e => { if (rec || (memOnly && saved.some(r => !r.downloaded))) { e.preventDefault(); e.returnValue = ""; } });
+  window.__review = { saved, held, get T() { return T; }, get playing() { return playing; }, P };
 
   // ---------- UI ----------
   const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, "0")}`;
@@ -561,10 +725,11 @@ async function start(src) {
     drawMarks();
   }
   function drawMarks() {
-    document.querySelectorAll(".mark, .cutreg, .nmark").forEach(m => m.remove());
-    const reg = (a, b, open) => { const m = document.createElement("div"); m.className = "cutreg" + (open ? " open" : ""); m.style.left = X(a) + "%"; if (!open) m.style.width = ((b - a) / VS() * 100) + "%"; $("bar").appendChild(m); };
-    for (const d of drafts) if (d.cut) reg(d.t, d.t2); else { const m = document.createElement("div"); m.className = "nmark"; m.style.left = X(d.t) + "%"; $("bar").appendChild(m); }
+    document.querySelectorAll(".mark, .cutreg, .hlreg, .nmark").forEach(m => m.remove());
+    const reg = (a, b, open, cls) => { const m = document.createElement("div"); m.className = (cls || "cutreg") + (open ? " open" : ""); m.style.left = X(a) + "%"; if (!open) m.style.width = ((b - a) / VS() * 100) + "%"; $("bar").appendChild(m); };
+    for (const d of drafts) if (d.cut) reg(d.t, d.t2); else if (d.range) reg(d.t, d.t2, false, "hlreg"); else { const m = document.createElement("div"); m.className = "nmark"; m.style.left = X(d.t) + "%"; $("bar").appendChild(m); }
     if (cutIn !== null) reg(cutIn, cutIn, true);
+    if (hlIn !== null) reg(hlIn, hlIn, true, "hlreg");
     for (const s of strokes) { const m = document.createElement("div"); m.className = "mark"; m.style.left = X(s.t) + "%"; $("bar").appendChild(m); }
   }
   let lastSeg = -1;
@@ -625,6 +790,8 @@ async function start(src) {
     else if (k === "+" || k === "=") zoomStep(0.5); else if (k === "-") zoomStep(2); else if (k === "0") zoomTo(TOTAL, 0, 0);
     else if (k === "i" || k === "I") markCutIn();
     else if (k === "o" || k === "O") markCutOut();
+    else if (k === "s" || k === "S") markHlIn();
+    else if (k === "e" || k === "E") markHlOut();
   };
 
   // ---------- written notes ----------
@@ -663,6 +830,24 @@ async function start(src) {
   }
   function previewCut(d) { seek(Math.max(0, d.t - 2)); setPlaying(true); cutPrev = { a: d.t, b: d.t2 }; }
   $("cutIn").onclick = markCutIn; $("cutOut").onclick = markCutOut;
+  // ---------- sections: a stretch highlighted on the timeline with a note about all of it (nothing is cut) ----------
+  function markHlIn() { hlIn = T; drawMarks(); msg(`Section starts at ${fmtS(T)}. Play or scrub to where it ends, then press E.`); }
+  function markHlOut() {
+    if (hlIn === null) { msg("Press S (or \"Section from here\") where the section starts first."); return; }
+    const a = Math.min(hlIn, T), b = Math.max(hlIn, T);
+    if (b - a < 0.05) { msg("That section is empty: move the playhead to where it ends, then press E."); return; }
+    if (playing || want) setPlaying(false);
+    const text = noteBox.value.trim();
+    drafts.push({ t: a, t2: b, range: true, kind: "Section", group: "section", w: wall(), text, strokes: attach(a) });
+    log("note", { text: `Section ${fmtS(a)} to ${fmtS(b)}${text ? ": " + text : ""}` });
+    hlIn = null; noteBox.value = ""; noteT = null; renderDrafts();
+    if (text) { msg(`Note added for ${fmtS(a)} to ${fmtS(b)}.`); return; }
+    msg("Section marked. Type what you want to say about it, then press Enter.");
+    const i = drafts.length - 1, span = $("drafts").querySelector(`.dn[data-i="${i}"] .tx`);   // straight into writing its note
+    if (span) editInline(span, "", v => { drafts[i].text = v || "Look at this section"; renderDrafts(); }, "What about this section?");
+  }
+  function playRange(d) { seek(d.t); setPlaying(true); rangePlay = { a: d.t, b: d.t2 }; }
+  $("hlIn").onclick = markHlIn; $("hlOut").onclick = markHlOut;
   // ---------- quick notes: one click for the fixes and ideas asked for most (quick_notes.json beside the page replaces this list) ----------
   let QUICK = { fix: ["Bad take", "Bad cut", "Cut this pause", "Word cut off", "Zoom on the wrong thing", "Zoom not centred", "Wrong sfx", "Sound too loud", "Wrong music", "Subtitles off", "Bad frame", "Put this back"],
     idea: ["Zoom here", "Add meme", "Add a sound", "Add a whoosh", "Music change here", "Stop the music here", "Add an edit here", "Run-on, no cut", "B-roll here"] };
@@ -683,9 +868,9 @@ async function start(src) {
   };
   noteBox.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addNote(); } if (e.key === "Escape") noteBox.blur(); });
   $("noteAdd").onclick = addNote;
-  function editInline(span, text, save) {   // swap a note's text for an input: Enter or leaving it saves, Escape cancels
+  function editInline(span, text, save, hint) {   // swap a note's text for an input: Enter or leaving it saves, Escape cancels
     const box = document.createElement("input");
-    box.className = "ed"; box.value = text; box.autocomplete = "off";
+    box.className = "ed"; box.value = text; box.autocomplete = "off"; if (hint) box.placeholder = hint;
     span.replaceWith(box); box.focus(); box.setSelectionRange(text.length, text.length);
     let done = false;
     const finish = keep => { if (done) return; done = true; const v = box.value.trim(); save(keep && v && v !== text ? v : null); };
@@ -699,12 +884,12 @@ async function start(src) {
     const loose = strokes.filter((s, i) => !drafts.some(d => d.strokes.includes(i))).length;
     if (!drafts.length && !loose) { el.innerHTML = ""; return; }
     const count = [drafts.length ? `${drafts.length} note${drafts.length === 1 ? "" : "s"}` : "", loose ? `${loose} drawing${loose === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
-    el.innerHTML = drafts.map((d, i) => `<div class="dn" data-i="${i}"><b data-t="${d.t}" title="Jump here">${fmtS(d.t)}</b>
-      <span>${d.group ? `<span class="tag">${esc(d.group)}</span>` : ""}${d.cut ? "✂" : "✎"} <span class="tx editable" title="Click to edit">${esc(d.text)}</span>${d.strokes.length ? ` <span class="meta">(+ drawing)</span>` : ""}</span>${d.cut ? `<span class="pv" title="Play the video across this cut">▶ preview</span>` : ""}<span class="x" title="Remove">×</span></div>`).join("") +
+    el.innerHTML = drafts.map((d, i) => `<div class="dn" data-i="${i}"><b data-t="${d.t}" title="Jump here">${fmtS(d.t)}${d.range ? "–" + fmtS(d.t2) : ""}</b>
+      <span>${d.group ? `<span class="tag">${esc(d.group)}</span>` : ""}${d.cut ? "✂" : d.range ? "▭" : "✎"} <span class="tx editable" title="Click to edit">${esc(d.text)}</span>${d.strokes.length ? ` <span class="meta">(+ drawing)</span>` : ""}</span>${d.cut ? `<span class="pv" title="Play the video across this cut">▶ preview</span>` : d.range ? `<span class="pv" title="Play this section once">▶ play</span>` : ""}<span class="x" title="Remove">×</span></div>`).join("") +
       (loose ? `<div class="dn"><span class="meta">${loose} drawing${loose === 1 ? "" : "s"} with no note (the red dot${loose === 1 ? "" : "s"} on the timeline)</span><span class="x" id="dropLoose" title="Remove these drawings">×</span></div>` : "") +
       (rec ? `<div class="bar2 meta">These notes will be saved with the voice review you're recording.</div>`
            : `<div class="bar2"><button class="primary small" id="saveWritten">Save review (${count})</button>
-              <span class="meta">Downloads a file to send back. Your notes are also kept on this page until you save.</span></div>`);
+              <span class="meta">Saved reviews wait below until you download them.</span></div>`);
   }
   $("drafts").onclick = e => {
     const row = e.target.closest(".dn");
@@ -713,7 +898,7 @@ async function start(src) {
       editInline(e.target, drafts[i].text, v => { if (v) { drafts[i].text = v; msg("Note changed."); } renderDrafts(); });
       return;
     }
-    if (row && e.target.classList.contains("pv")) { previewCut(drafts[+row.dataset.i]); return; }
+    if (row && e.target.classList.contains("pv")) { const d = drafts[+row.dataset.i]; d.range ? playRange(d) : previewCut(d); return; }
     if (e.target.dataset.t) { seek(+e.target.dataset.t); clearInk(); return; }
     if (e.target.id === "dropLoose") {   // drawings no note points at: take them out and renumber the notes' drawings
       const keep = strokes.map((s, i) => drafts.some(d => d.strokes.includes(i))), map = [];
@@ -725,8 +910,9 @@ async function start(src) {
     if (row && e.target.classList.contains("x")) { drafts.splice(+row.dataset.i, 1); renderDrafts(); return; }
     if (e.target.id === "saveWritten") {   // every drawing is saved, with or without a note
       const notes = drafts.map(d => Object.assign(noteOf(d), { w: null }));
-      saveFile(payloadOf({ events: [], strokes: strokes.map(s => Object.assign({}, s, { w0: null, w1: null })), notes, audio: "" }));
+      keep(payloadOf({ events: [], strokes: strokes.map(s => Object.assign({}, s, { w0: null, w1: null })), notes, audio: "" }));
       drafts.length = 0; strokes.length = 0; renderDrafts(); drawMarks(); clearInk(); store.del(STASH);
+      msg("Review saved on this page (below). Add more, or press Download when you're ready to send it.");
     }
   };
   setInterval(() => { $("noteAt").textContent = fmtS(noteT ?? T); }, 100);

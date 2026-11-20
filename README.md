@@ -23,11 +23,15 @@ another name.
 Then:
 
 1. Play the video. **N** types a note at this moment, **I** and **O** mark the start and end of a stretch to
-   cut, the Fix and Idea buttons add a ready-made note. Draw on the picture to point at something.
-2. "Start voice review" records you talking while you watch (optional; needs a microphone).
-3. **Save review** downloads a `.review.json` file. Send it to the editor.
+   cut, **S** and **E** highlight a section to write one note about, the Fix and Idea buttons add a ready-made
+   note. Draw on the picture to point at something.
+2. "Start voice review" records you talking while you watch (optional; needs a microphone). When you finish,
+   the page writes out what you said so you can check it.
+3. **Save review** keeps the review on the page, under "Your reviews". Nothing downloads until you press
+   **Download** there; then send the `.review.json` file to the editor.
 
-Notes you typed but didn't save come back when you open the same link again in the same browser.
+Saved reviews stay in your browser, for that video, until you delete them: close the page and they are still
+there next time. Notes you typed but didn't save come back the same way.
 
 ## For AI assistants
 
@@ -39,6 +43,11 @@ Notes you typed but didn't save come back when you open the same link again in t
 - On YouTube the frame-step keys move by small steps, not exact frames, and a paused frame can show YouTube's
   play icon in the middle (YouTube draws it; the page can't remove it).
 - A voice review is a big file: about 1.3 MB a minute.
+- Writing out what you said happens on your own computer; nothing is uploaded. The first time, the page
+  downloads a speech-to-text model (about 80 MB, kept by the browser afterwards) from jsDelivr and Hugging Face.
+  It is English only, takes roughly a sixth of the recording's length, and is there for you to check yourself:
+  you can download the review without waiting for it, and the editor's side transcribes the recording again.
+- A private window keeps saved reviews only while the page is open; the page says so.
 - `quick_notes.json` is the list of Fix and Idea buttons; edit it to change them.
 - `&fps=60` in the link sets the size of the frame-step keys (default 30).
 - Made for Chrome, Edge and Firefox on a computer. Not tested on phones or in Safari.

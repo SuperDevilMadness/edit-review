@@ -42,8 +42,11 @@ Example: the video `https://youtu.be/aqz-KE-bpKQ` becomes `PAGE/?yt=aqz-KE-bpKQ`
 1. Open the link in Chrome, Edge or Firefox on a computer (a phone works for typed notes).
 2. Play the video. Press **N** to type a note at this moment, **I** and **O** to mark the start and end of a
    stretch to cut, or click a quick-note button. Draw on the picture to point. "Start voice review" is optional.
-3. Press **Save review**. A `.review.json` file lands in Downloads.
-4. Send that file back to the person who gave you the link.
+3. **S** and **E** mark the start and end of a section to write one note about (nothing is cut).
+4. Press **Save review** (or finish the voice review). The review is kept on the page under "Your reviews";
+   a voice review is written out there so they can check what they said.
+5. Press **Download** on the review when they are done. A `.review.json` file lands in Downloads.
+6. Send that file back to the person who gave you the link.
 
 ## Limits you should know and say
 
@@ -55,7 +58,10 @@ Example: the video `https://youtu.be/aqz-KE-bpKQ` becomes `PAGE/?yt=aqz-KE-bpKQ`
   this computer".
 - Voice recording needs the page opened from an `https://` address (or `localhost`) and a microphone.
 - On YouTube the frame-step keys (`,` and `.`) move by small steps, not exact frames.
-- Typed notes that were never saved come back when the same link is opened again in the same browser.
+- Typed notes that were never saved, and saved reviews not yet downloaded, are still there when the same link is
+  opened again in the same browser (not in a private window).
+- The first voice review downloads a speech-to-text model (about 80 MB, once). It runs on the reviewer's own
+  computer, English only; the review can be downloaded without waiting for it.
 
 ## Reading a review file
 
@@ -64,12 +70,15 @@ If someone hands you a `.review.json`, it is JSON with:
 - `session`, `name`: the review's name, taken from the video's title. `source`: where the video was. `duration`: its length in seconds.
   `reviewer`: the reviewer's name if they gave one.
 - `notes`: the typed notes. Each has `t` (seconds into the video) and `text`. A cut has `cut: true` and `t2`
-  (cut from `t` to `t2`; the ends are rough on purpose). A quick note has `kind` and `group` (`fix` or `idea`).
+  (cut from `t` to `t2`; the ends are rough on purpose). A section note has `range: true` and `t2`: the text is
+  about everything from `t` to `t2`, and nothing is to be cut. A quick note has `kind` and `group` (`fix` or `idea`).
   `strokes` lists the drawings that belong to the note.
 - `strokes`: drawings. Each has `t`, `color` and `pts`, points as fractions of the picture's width and height.
 - `audio`: the voice recording, base64 (empty when there is none). `events` is the playhead log recorded with
   it: `w` is seconds into the recording, `t` the video time then, `playing` and `rate` how it was moving. Use it
   to place each spoken sentence on the video.
+- `said`: what the page itself made of the recording, for the reviewer to check: lines with `w` (seconds into
+  the recording), `t` (video time) and `text`. It can be missing or rough; the recording is the real thing.
 - `good`: segments (each `segLen` seconds long, counted from 0) the reviewer marked as good.
 
 ## Running the page yourself (only if you can run commands)
