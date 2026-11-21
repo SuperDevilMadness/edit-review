@@ -123,6 +123,7 @@
   .notebox input { flex: 1; min-width: 180px; }
   .notebox .at { align-self: center; color: var(--accent); font-variant-numeric: tabular-nums; min-width: 58px; font-size: 12px; }
   #drafts { margin-top: 6px; }
+  #drafts .dlist { max-height: min(320px, 40vh); overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; padding: 2px 0; }
   #drafts .dn { display: flex; gap: 10px; align-items: baseline; padding: 4px 8px; border-radius: 4px; }
   #drafts .dn:hover { background: #ffffff10; }
   #drafts .dn b { color: var(--accent); cursor: pointer; font-variant-numeric: tabular-nums; min-width: 52px; }
@@ -969,19 +970,24 @@ self.onmessage = async e => {
   }
   let openEdit = null, draftsDown = false;
   $("drafts").addEventListener("mousedown", e => { if (e.target.classList.contains("ed")) return; draftsDown = true; setTimeout(() => { draftsDown = false; }, 400); });
+  let draftsShown = 0;
   function renderDrafts() {
-    const el = $("drafts");
+    const el = $("drafts"), was = el.querySelector(".dlist"), top = was ? was.scrollTop : 0;
     if (SH) SH.changed();
     drawMarks(); stash();
     const loose = strokes.filter((s, i) => !drafts.some(d => d.strokes.includes(i))).length;
     if (!drafts.length && !loose) { el.innerHTML = ""; return; }
     const count = [drafts.length ? `${drafts.length} note${drafts.length === 1 ? "" : "s"}` : "", loose ? `${loose} drawing${loose === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
-    el.innerHTML = drafts.map((d, i) => `<div class="dn" data-i="${i}"><b data-t="${d.t}" title="Jump here">${fmtS(d.t)}${d.range ? "–" + fmtS(d.t2) : ""}</b>
+    el.innerHTML = `<div class="dlist">` + drafts.map((d, i) => `<div class="dn" data-i="${i}"><b data-t="${d.t}" title="Jump here">${fmtS(d.t)}${d.range ? "–" + fmtS(d.t2) : ""}</b>
       <span>${d.group ? `<span class="tag">${esc(d.group)}</span>` : ""}${d.cut ? "✂" : d.range ? "▭" : "✎"} <span class="tx editable" title="Click to edit">${esc(d.text)}</span>${d.strokes.length ? ` <span class="meta">(+ drawing)</span>` : ""}</span>${d.cut ? `<span class="pv" title="Play the video across this cut">▶ preview</span>` : d.range ? `<span class="pv" title="Play this section once">▶ play</span>` : ""}<span class="x" title="Remove">×</span></div>`).join("") +
-      (loose ? `<div class="dn"><span class="meta">${loose} drawing${loose === 1 ? "" : "s"} with no note (the red dot${loose === 1 ? "" : "s"} on the timeline)</span><span class="x" id="dropLoose" title="Remove these drawings">×</span></div>` : "") +
+      (loose ? `<div class="dn"><span class="meta">${loose} drawing${loose === 1 ? "" : "s"} with no note (the red dot${loose === 1 ? "" : "s"} on the timeline)</span><span class="x" id="dropLoose" title="Remove these drawings">×</span></div>` : "") + `</div>` +
       (rec ? `<div class="bar2 meta">These notes will be saved with the voice review you're recording.</div>`
            : `<div class="bar2"><button class="primary small" id="saveWritten">Save review (${count})</button>
-              <span class="meta">${SH && SH.on ? "Saved reviews wait below until you send them." : "Saved reviews wait below until you download them."}</span></div>`);
+              <span class="meta">${SH && SH.on ? "Saved reviews wait under Your reviews until you send them." : "Saved reviews wait under Your reviews until you download them."}</span></div>`);
+    // the list keeps its place when a note is edited or removed, and shows a note just added (they're added at the end)
+    const box = el.querySelector(".dlist");
+    box.scrollTop = drafts.length > draftsShown ? box.scrollHeight : top;
+    draftsShown = drafts.length;
   }
   $("drafts").onclick = e => {
     const row = e.target.closest(".dn");
@@ -1007,7 +1013,7 @@ self.onmessage = async e => {
       if (SH) SH.settle(drafts, "saved");
       keep(payloadOf({ events: [], strokes: strokes.map(s => Object.assign({}, s, { w0: null, w1: null })), notes, audio: "" }), 0, drafts.map(d => d.nid).filter(Boolean));
       drafts.length = 0; strokes.length = 0; renderDrafts(); drawMarks(); clearInk(); store.del(STASH);
-      msg(SH && SH.on ? "Review saved on this page (below). Add more, or press Send when you're ready." : "Review saved on this page (below). Add more, or press Download when you're ready to send it.");
+      msg(SH && SH.on ? "Review saved under Your reviews. Add more, or press Send when you're ready." : "Review saved under Your reviews. Add more, or press Download when you're ready to send it.");
     }
   };
   setInterval(() => { $("noteAt").textContent = fmtS(noteT ?? T); }, 100);
