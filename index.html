@@ -62,6 +62,10 @@
   .cutreg.open { background: none; border-right: none; }
   .hlreg { position: absolute; top: 0; bottom: 0; background: #ffd43b33; border-left: 2px solid #ffd43b; border-right: 2px solid #ffd43b; pointer-events: none; }
   .hlreg.open { background: none; border-right: none; }
+  .smark { position: absolute; top: 14px; width: 2px; height: 12px; margin-left: -1px; background: var(--dim); opacity: .75; pointer-events: none; }
+  .sreg { position: absolute; top: 22px; height: 4px; background: #9aa0a699; pointer-events: none; }
+  .said .ln .ic { color: var(--dim); min-width: 14px; }
+  .said .sub { color: var(--dim); font-size: 11px; padding: 6px 6px 2px; text-transform: uppercase; letter-spacing: .04em; }
   .omark { position: absolute; top: 4px; width: 2px; height: 10px; margin-left: -1px; background: #2ec4b6; pointer-events: none; }
   .oreg { position: absolute; top: 0; height: 5px; background: #2ec4b6aa; pointer-events: none; }
   .sharebar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 10px; padding: 8px 12px; background: var(--panel); border-radius: 6px; font-size: 12px; color: var(--dim); }
@@ -583,7 +587,7 @@ async function start(src) {
   async function keep(payload, voiceSecs, nids) {
     const r = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, key: KEY, file: `${SESSION}-${stamp()}.review.json`, voiceSecs: voiceSecs || 0,
       downloaded: false, sent: null, nids: nids || [], said: payload.audio ? { state: "wait" } : null, payload };
-    saved.push(r); if (r.said) openSaid.add(r.id);
+    saved.push(r); openSaid.add(r.id);
     renderSaved();
     if (!(await held.put(r))) { memOnly = true; renderSaved(); }
     return r;
@@ -603,8 +607,14 @@ async function start(src) {
     return rows.sort((a, b) => a[0] - b[0]).map(x => x[1]).join("\n");
   }
   function saidHtml(r) {
+    const s = r.said, notes = r.payload.notes || [];
+    const typed = notes.map((n, k) => [n.t, `<div class="ln" data-t="${n.t}" data-n="${k}" title="Jump the video here${n.strokes && n.strokes.length ? " and show the drawing" : ""}"><b>${fmtS(n.t)}${n.t2 != null ? "–" + fmtS(n.t2) : ""}</b><span class="ic">${n.cut ? "✂" : n.range ? "▭" : "✎"}</span><span>${n.group ? `<span class="tag">${esc(n.group)}</span> ` : ""}${esc(n.text || n.kind || "")}${n.strokes && n.strokes.length ? ' <span class="meta">(+ drawing)</span>' : ""}</span></div>`]);
+    if (!s) return typed.length ? typed.sort((a, b) => a[0] - b[0]).map(x => x[1]).join("") : '<div class="wait">No typed notes in this review.</div>';
+    const head = typed.length ? `<div class="sub">Typed notes</div>` + typed.sort((a, b) => a[0] - b[0]).map(x => x[1]).join("") + `<div class="sub">What you said</div>` : "";
+    return head + saidOnly(r);
+  }
+  function saidOnly(r) {
     const s = r.said;
-    if (!s) return "";
     if (s.state === "done") return s.lines.length ? s.lines.map(l => `<div class="ln" data-t="${l.t}" title="Jump the video here"><b>${fmtS(l.t)}</b><span>${esc(l.text)}</span></div>`).join("")
       : '<div class="wait">No words found in this recording.</div>';
     if (s.state === "error") return `<div class="wait">What you said couldn't be written out in this browser (${esc(s.error)}). Your recording is in the review all the same, so Download works. <button class="small" data-act="retry">Try again</button></div>`;
@@ -612,6 +622,7 @@ async function start(src) {
     return '<div class="wait">Writing out what you said… You can download the review without waiting.</div>';
   }
   function renderSaved() {
+    try { drawMarks(); } catch (e) {}
     const share = SH && SH.on, left = saved.filter(r => !(share ? r.sent : r.downloaded)).length;
     $("rvcount").textContent = saved.length ? `${saved.length} saved · ${left} not ${share ? "sent" : "downloaded"}` : "";
     $("reviewshelp").innerHTML = share
@@ -623,7 +634,7 @@ async function start(src) {
       return `<div class="rv${open ? " open" : ""}" data-id="${r.id}"><b>Review ${i + 1}</b>
         <span class="meta">${when} · ${r.voiceSecs ? fmt(r.voiceSecs).slice(0, -3) + " of voice · " : ""}${n} typed note${n === 1 ? "" : "s"} · ${d} drawing${d === 1 ? "" : "s"}</span>
         ${share ? `<span class="chip${r.sent ? " ok" : ""}">${r.sent ? "sent" : r.sendWhenReady ? "sending soon" : "not sent"}</span>` : ""}<span class="chip${r.downloaded ? " ok" : ""}">${r.downloaded ? "downloaded" : "not downloaded"}</span><span class="spacer"></span>
-        ${r.said ? `<button class="small" data-act="said">${open ? "▴" : "▾"} What I said</button>` : ""}
+        ${n || r.said ? `<button class="small" data-act="said" title="Show or hide this review's notes">${open ? "▴ Hide notes" : "▾ Show notes"}</button>` : ""}
         ${n || (r.said && r.said.state === "done" && r.said.lines.length) ? '<button class="small" data-act="text" title="The notes as plain text with their times, to paste in a chat">Copy as text</button>' : ""}
         ${share ? `<button class="small primary" data-act="send" title="Send this review to the editor now">${r.sent ? "Send again" : "Send"}</button>` : ""}
         <button class="small${share ? "" : " primary"}" data-act="dl" title="Save this review as a file">${r.downloaded ? "Download again" : "Download"}</button>
@@ -635,7 +646,12 @@ async function start(src) {
     const row = e.target.closest(".rv"); if (!row) return;
     const i = saved.findIndex(r => r.id === row.dataset.id), r = saved[i], ln = e.target.closest(".ln"), act = e.target.dataset.act;
     if (!r) return;
-    if (ln) { if (playing || want) setPlaying(false); seek(+ln.dataset.t); msg(`Jumped to ${fmtS(+ln.dataset.t)}.`); return; }
+    if (ln) {
+      if (playing || want) setPlaying(false); seek(+ln.dataset.t); msg(`Jumped to ${fmtS(+ln.dataset.t)}.`);
+      const note = ln.dataset.n != null ? r.payload.notes[+ln.dataset.n] : null;
+      if (note && note.strokes && note.strokes.length) { clearInk(); for (const k of note.strokes) { const st = (r.payload.strokes || [])[k]; if (st && st.pts) paint(st); } }
+      return;
+    }
     if (act === "said") { openSaid.has(r.id) ? openSaid.delete(r.id) : openSaid.add(r.id); renderSaved(); }
     if (act === "text") copyText(`Notes on ${NAME}\n` + textOf(r), "Notes copied as text.");
     if (act === "dl") download(r);
@@ -723,7 +739,7 @@ self.onmessage = async e => {
   held.all().then(all => {
     if (all === null) { memOnly = true; return; }
     for (const r of all.filter(r => r.key === KEY).sort((a, b) => a.id < b.id ? -1 : 1)) {
-      saved.push(r);
+      saved.push(r); openSaid.add(r.id);   // open, so the reviewer sees what they noted without hunting for it
       if (r.said && r.said.state !== "done" && r.said.state !== "error") writeOut(r);   // the page closed while it was being written out
     }
     renderSaved();
@@ -764,7 +780,13 @@ self.onmessage = async e => {
     drawMarks();
   }
   function drawMarks() {
-    document.querySelectorAll(".mark, .cutreg, .hlreg, .nmark, .omark, .oreg").forEach(m => m.remove());
+    document.querySelectorAll(".mark, .cutreg, .hlreg, .nmark, .omark, .oreg, .smark, .sreg").forEach(m => m.remove());
+    for (const r of saved) for (const n of r.payload.notes || []) {   // notes already saved in a review on this page: grey
+      const m = document.createElement("div");
+      if (n.t2 != null && n.t2 > n.t) { m.className = "sreg"; m.style.left = X(n.t) + "%"; m.style.width = ((n.t2 - n.t) / VS() * 100) + "%"; }
+      else { m.className = "smark"; m.style.left = X(n.t) + "%"; }
+      $("bar").appendChild(m);
+    }
     const reg = (a, b, open, cls) => { const m = document.createElement("div"); m.className = (cls || "cutreg") + (open ? " open" : ""); m.style.left = X(a) + "%"; if (!open) m.style.width = ((b - a) / VS() * 100) + "%"; $("bar").appendChild(m); };
     for (const d of drafts) if (d.cut) reg(d.t, d.t2); else if (d.range) reg(d.t, d.t2, false, "hlreg"); else { const m = document.createElement("div"); m.className = "nmark"; m.style.left = X(d.t) + "%"; $("bar").appendChild(m); }
     if (cutIn !== null) reg(cutIn, cutIn, true);
@@ -894,7 +916,7 @@ self.onmessage = async e => {
   function playRange(d) { seek(d.t); setPlaying(true); rangePlay = { a: d.t, b: d.t2 }; }
   $("hlIn").onclick = markHlIn; $("hlOut").onclick = markHlOut;
   // ---------- quick notes: one click for the fixes and ideas asked for most (quick_notes.json beside the page replaces this list) ----------
-  let QUICK = { fix: ["Bad take", "Bad cut", "Cut this pause", "Word cut off", "Zoom on the wrong thing", "Zoom not centred", "Wrong sfx", "Sound too loud", "Wrong music", "Subtitles off", "Bad frame", "Put this back"],
+  let QUICK = { fix: ["Bad take", "Bad cut", "Cut this pause", "Word cut off", "Remove stutter", "Zoom on the wrong thing", "Zoom not centred", "Wrong sfx", "Sound too loud", "Wrong music", "Subtitles off", "Bad frame", "Put this back"],
     idea: ["Zoom here", "Add meme", "Add a sound", "Add a whoosh", "Music change here", "Stop the music here", "Add an edit here", "Run-on, no cut", "B-roll here"] };
   function drawQuick() {
     const row = (g, label) => `<span class="lab">${label}</span>` + (QUICK[g] || []).map(k => `<button class="${g}" data-g="${g}" data-k="${esc(k)}" title="Add this note at the playhead. Anything typed in the note box is added to it.">${esc(k)}</button>`).join("");
