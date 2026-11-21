@@ -921,8 +921,8 @@ self.onmessage = async e => {
   function playRange(d) { seek(d.t); setPlaying(true); rangePlay = { a: d.t, b: d.t2 }; }
   $("hlIn").onclick = markHlIn; $("hlOut").onclick = markHlOut;
   // ---------- quick notes: one click for the fixes and ideas asked for most (quick_notes.json beside the page replaces this list) ----------
-  let QUICK = { fix: ["Bad take", "Bad cut", "Cut this pause", "Word cut off", "Remove stutter", "Zoom on the wrong thing", "Bad zoom", "Wrong sfx", "Sound too loud", "Wrong music", "Subtitles off", "Bad frame", "Put this back"],
-    idea: ["Zoom here", "Add meme", "Add a sound", "Add a whoosh", "Music change here", "Stop the music here", "Add an edit here", "Run-on, no cut", "B-roll here"] };
+  let QUICK = { fix: ["Bad take", "Bad cut", "Cut this pause", "Word cut off", "Remove stutter", "Zoom on the wrong thing", "Bad zoom", "Wrong sfx", "Remove sfx", "Sound too loud", "Wrong music", "Subtitles off", "Bad frame"],
+    idea: ["Zoom here", "Add meme", "Add a sound", "Add meme sfx", "Add a whoosh", "Music change here", "Stop the music here", "Add an edit here", "Run-on, no cut", "B-roll here"] };
   function drawQuick() {
     const row = (g, label) => `<span class="lab">${label}</span>` + (QUICK[g] || []).map(k => `<button class="${g}" data-g="${g}" data-k="${esc(k)}" title="Add this note at the playhead. Anything typed in the note box is added to it.">${esc(k)}</button>`).join("");
     $("quick").innerHTML = row("fix", "Fix") + '<span class="brk"></span>' + row("idea", "Idea");
