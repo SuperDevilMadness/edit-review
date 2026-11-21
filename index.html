@@ -441,6 +441,11 @@ async function start(src) {
   }
   P.onstate = p => { want = p; showWant(); if (p) ink.style.pointerEvents = ""; else cutPrev = rangePlay = null; };
   P.onerror = m => msg(m);
+  // a time code clicked far down the page: bring the video back into view so the jump can be seen
+  function toVideo() {
+    const r = $("stage").getBoundingClientRect();
+    if (r.top < 0 || r.bottom > innerHeight) $("stage").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   function seek(t) {
     T = Math.max(0, Math.min(TOTAL - 0.05, t)); loopSeg = segOf(T); P.seek(T); log("seek", {});
     clearInk(); strokes.filter(s => Math.abs(s.t - T) < 0.05).forEach(paint);   // a drawing shows only on its own moment
@@ -647,7 +652,7 @@ async function start(src) {
     const i = saved.findIndex(r => r.id === row.dataset.id), r = saved[i], ln = e.target.closest(".ln"), act = e.target.dataset.act;
     if (!r) return;
     if (ln) {
-      if (playing || want) setPlaying(false); seek(+ln.dataset.t); msg(`Jumped to ${fmtS(+ln.dataset.t)}.`);
+      if (playing || want) setPlaying(false); seek(+ln.dataset.t); toVideo(); msg(`Jumped to ${fmtS(+ln.dataset.t)}.`);
       const note = ln.dataset.n != null ? r.payload.notes[+ln.dataset.n] : null;
       if (note && note.strokes && note.strokes.length) { clearInk(); for (const k of note.strokes) { const st = (r.payload.strokes || [])[k]; if (st && st.pts) paint(st); } }
       return;
@@ -1141,7 +1146,7 @@ self.onmessage = async e => {
     $("others").onclick = e => {
       const row = e.target.closest(".on"); if (!row) return;
       if (playing || want) setPlaying(false);
-      seek(+row.dataset.t);
+      seek(+row.dataset.t); toVideo();
       const o = [...others.values()].find(x => Math.abs(x.t - +row.dataset.t) < 0.01 && x.strokes && x.strokes.length);
       if (o) for (const s of o.strokes) { const pts = []; for (let i = 0; i + 1 < s.pts.length; i += 2) pts.push([s.pts[i], s.pts[i + 1]]); paint({ color: s.color, pts }); }
     };
@@ -1213,7 +1218,7 @@ self.onmessage = async e => {
           + (d.message ? `<div style="margin-top:4px">${esc(d.message)}</div>` : "")
           + `<div class="clip"><iframe src="https://www.youtube-nocookie.com/embed/${d.clips}?rel=0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="Fix clips"></iframe></div>`
           + d.items.map(it => `<div class="fx" data-n="${+it.n}"><span class="n">Fix ${+it.n}</span>
-              <span class="what"><span class="was">At <a href="#" data-act="jump" data-t="${+it.t}">${fmtS(+it.t)}${it.t2 != null ? "–" + fmtS(+it.t2) : ""}</a>: “${esc(it.note || "")}”</span><br>${esc(it.changed || "")}</span>
+              <span class="what"><span class="was">At <a href="#" data-act="jump" data-t="${+it.t}" title="Jump the video at the top of the page to this moment">${fmtS(+it.t)}${it.t2 != null ? "–" + fmtS(+it.t2) : ""}</a>: “${esc(it.note || "")}”</span><br>${esc(it.changed || "")}</span>
               <button class="small" data-act="watch" data-at="${+it.at}" title="Play this fix in the clips video">▶ Watch</button>
               ${signed ? "" : `<span class="ans"><label><input type="radio" name="ok-${esc(rid)}-${+it.n}" value="1"> Looks good</label><label><input type="radio" name="ok-${esc(rid)}-${+it.n}" value="0"> Needs more work</label></span>
               <input type="text" class="fxc" placeholder="What still needs work? (only if it does)" maxlength="2000" autocomplete="off">`}</div>`).join("")
@@ -1227,7 +1232,7 @@ self.onmessage = async e => {
       const box = e.target.closest(".reply"); if (!box) return;
       const rid = box.dataset.rid, d = replies.get(rid), act = e.target.dataset.act;
       if (act === "watch") { box.querySelector("iframe").src = `https://www.youtube-nocookie.com/embed/${d.clips}?rel=0&autoplay=1&start=${Math.floor(+e.target.dataset.at)}`; return; }
-      if (act === "jump") { e.preventDefault(); if (playing || want) setPlaying(false); seek(+e.target.dataset.t); return; }
+      if (act === "jump") { e.preventDefault(); if (playing || want) setPlaying(false); seek(+e.target.dataset.t); toVideo(); msg(`Jumped to ${fmtS(+e.target.dataset.t)} in the video above (the version you reviewed). ▶ Watch plays the fix.`); return; }
       if (act !== "signoff") return;
       const items = [];
       for (const row of box.querySelectorAll(".fx")) {
