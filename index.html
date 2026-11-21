@@ -86,6 +86,7 @@
   .fx .what a { color: #2ec4b6; }
   .fx .ans label { margin-right: 10px; white-space: nowrap; }
   .fx input.fxc { flex-basis: 100%; }
+  .fx .fxsaved { color: var(--good); font-size: 12px; white-space: nowrap; }
   .reply textarea { width: 100%; min-height: 50px; margin-top: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
   #others { margin-top: 8px; }
   #others .hd { color: var(--dim); font-size: 12px; margin: 6px 0 2px; }
@@ -145,6 +146,16 @@
   .rv .ok { color: var(--good); }
   textarea.copybox { width: 100%; min-height: 110px; margin-top: 6px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: 12px/1.4 Consolas, monospace; }
   @media (max-width: 700px) { .time { min-width: 0; } .shortcuts { display: none; } }
+
+  /* wide screens: the lists sit beside the video in their own scrolling column, so nobody scrolls past the video */
+  @media (min-width: 1100px) {
+    main { max-width: 1840px; }
+    .cols { display: grid; grid-template-columns: minmax(0, 1fr) clamp(360px, 30vw, 520px); gap: 18px; align-items: start; }
+    .side { position: sticky; top: 10px; max-height: calc(100vh - 20px); overflow-y: auto; padding-right: 6px; }
+    .side .fixes, .side .reviews, .side #others:not(:empty) { margin: 0 0 16px; padding: 0 0 14px; border-top: 0; border-bottom: 1px solid var(--line); }
+    .side h2 { flex-wrap: wrap; }
+    .side .reply .clip { position: sticky; top: 0; z-index: 2; box-shadow: 0 6px 10px -4px #000c; }   /* the fix clips stay in view while the list scrolls */
+  }
 </style>
 </head>
 <body>
@@ -163,6 +174,7 @@
   <div id="review" style="display:none">
     <div class="whobar" id="whobar"><label>Your name <input type="text" id="who" placeholder="type it first: it goes on your notes" autocomplete="off" maxlength="60"></label>
       <span class="meta">Remembered on this computer.</span></div>
+    <div class="cols"><div class="colmain">
     <div class="stage" id="stage">
       <div id="player"></div>
       <canvas id="ink" width="960" height="540"></canvas>
@@ -209,7 +221,6 @@
     </div>
     <div class="quick" id="quick"></div>
     <div id="drafts"></div>
-    <div id="others"></div>
     <div class="msg" id="msg"></div>
     <div class="shortcuts">
       <span><kbd>Space</kbd> play / pause</span><span><kbd>←</kbd> <kbd>→</kbd> back / forward 2 s</span>
@@ -218,12 +229,15 @@
       <span><kbd>C</kbd> clear drawing</span><span><kbd>N</kbd> type a note</span><span><kbd>I</kbd> <kbd>O</kbd> cut from / to here</span><span><kbd>S</kbd> <kbd>E</kbd> section to note: start / end</span><span><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> timeline zoom</span><span><kbd>R</kbd> pause / resume voice review</span>
       <span class="dimtxt">Draw on the picture to point (it pauses the video).</span>
     </div>
+    </div><aside class="side">
     <section class="fixes" id="fixes" style="display:none"><h2>Fixes from the editor</h2><div id="fixlist"></div></section>
     <section class="reviews">
       <h2>Your reviews <span class="meta" id="rvcount"></span></h2>
       <div class="meta" id="reviewshelp">A saved review is kept on this page, in this browser, until you download it. When you're done, press <b>Download</b> and send the <b>.review.json</b> file to the person who gave you this link (Discord, email, anything).</div>
       <div id="saved"></div>
     </section>
+    <div id="others"></div>
+    </aside></div>
   </div>
 </main>
 <script>
@@ -1212,7 +1226,7 @@ self.onmessage = async e => {
       const list = [...replies.entries()].sort((a, b) => String(b[1].made).localeCompare(String(a[1].made)));
       $("fixes").style.display = list.length ? "" : "none";
       $("fixlist").innerHTML = list.map(([rid, d]) => {
-        const signed = store.get("signed:" + rid), mine = d.forUid === auth.uid;
+        const signed = store.get("signed:" + rid), mine = d.forUid === auth.uid, dr = fxDraft(rid);
         const when = d.made ? new Date(d.made).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
         return `<div class="reply" data-rid="${esc(rid)}"><div class="meta">For ${esc(d.forWho || "a reviewer")}'s review${mine ? " (yours)" : ""} · ${esc(when)} · ${d.items.length} fix${d.items.length === 1 ? "" : "es"}</div>`
           + (d.message ? `<div style="margin-top:4px">${esc(d.message)}</div>` : "")
@@ -1220,14 +1234,44 @@ self.onmessage = async e => {
           + d.items.map(it => `<div class="fx" data-n="${+it.n}"><span class="n">Fix ${+it.n}</span>
               <span class="what"><span class="was">At <a href="#" data-act="watch" data-at="${+it.at}" title="Play this fix in the clips video">${fmtS(+it.t)}${it.t2 != null ? "–" + fmtS(+it.t2) : ""}</a>: “${esc(it.note || "")}”</span><br>${esc(it.changed || "")}</span>
               <button class="small" data-act="watch" data-at="${+it.at}" title="Play this fix in the clips video">▶ Watch</button>
-              ${signed ? "" : `<span class="ans"><label><input type="radio" name="ok-${esc(rid)}-${+it.n}" value="1"> Looks good</label><label><input type="radio" name="ok-${esc(rid)}-${+it.n}" value="0"> Needs more work</label></span>
-              <input type="text" class="fxc" placeholder="What still needs work? (only if it does)" maxlength="2000" autocomplete="off">`}</div>`).join("")
+              ${signed ? "" : `<span class="ans"><label><input type="radio" name="ok-${esc(rid)}-${+it.n}" value="1"${(dr[it.n] || {}).ok === "1" ? " checked" : ""}> Looks good</label><label><input type="radio" name="ok-${esc(rid)}-${+it.n}" value="0"${(dr[it.n] || {}).ok === "0" ? " checked" : ""}> Needs more work</label></span>
+              <span class="fxsaved">${(dr[it.n] || {}).text ? "✓ Saved" : ""}</span>
+              <input type="text" class="fxc" placeholder="What still needs work? Type it and press Enter to save" maxlength="2000" autocomplete="off" value="${esc((dr[it.n] || {}).text || "")}">`}</div>`).join("")
           + (signed ? `<div class="meta" style="margin-top:8px; color:var(--good)">✓ Sign-off sent ${esc(signed)}.</div>`
-             : `<textarea class="fxcomment" placeholder="Anything else? (optional)" maxlength="2000"></textarea>
-                <div style="margin-top:8px"><button class="primary small" data-act="signoff">Send sign-off</button> <span class="meta">Answer each fix, then send. The editor gets it straight away.</span></div>`)
+             : `<textarea class="fxcomment" placeholder="Anything else? (optional)" maxlength="2000">${esc(dr.comment || "")}</textarea>
+                <div style="margin-top:8px"><button class="primary small" data-act="signoff">Send sign-off</button> <span class="meta">Answer each fix, then send. Your answers are saved on this page until you do; the editor gets them when you send.</span></div>`)
           + `</div>`;
       }).join("");
     }
+    // answers and comments are kept in this browser while the reviewer works through the list (Enter, typing, a pick),
+    // so a reload or a redraw never loses them; Send sign-off delivers them and clears the draft
+    function fxDraft(rid) { try { return JSON.parse(store.get("fxd:" + rid) || "{}"); } catch (e) { return {}; } }
+    function saveFx(box) {
+      const dr = {};
+      for (const row of box.querySelectorAll(".fx")) {
+        const pick = row.querySelector("input[type=radio]:checked"), t = row.querySelector(".fxc");
+        if (pick || (t && t.value.trim())) dr[row.dataset.n] = { ok: pick ? pick.value : "", text: t ? t.value : "" };
+      }
+      const c = box.querySelector(".fxcomment"); if (c && c.value.trim()) dr.comment = c.value;
+      store.set("fxd:" + box.dataset.rid, JSON.stringify(dr));
+    }
+    function savedFx(inp, enter) {   // a comment typed: it means "needs more work" unless a pick was made, and says it's saved
+      const row = inp.closest(".fx"), has = !!inp.value.trim();
+      if (has && !row.querySelector("input[type=radio]:checked")) row.querySelector('input[type=radio][value="0"]').checked = true;
+      saveFx(inp.closest(".reply"));
+      row.querySelector(".fxsaved").textContent = has ? "✓ Saved" : "";
+      if (enter && has) msg(`Fix ${row.dataset.n}: saved. It goes to the editor when you press Send sign-off.`);
+    }
+    $("fixlist").addEventListener("keydown", e => {
+      if (e.key !== "Enter" || !e.target.classList.contains("fxc")) return;
+      e.preventDefault(); savedFx(e.target, true); e.target.blur();
+    });
+    $("fixlist").addEventListener("focusout", e => { if (e.target.classList.contains("fxc")) savedFx(e.target, false); });
+    $("fixlist").addEventListener("input", e => {
+      const box = e.target.closest(".reply"); if (!box) return;
+      if (e.target.classList.contains("fxc")) e.target.closest(".fx").querySelector(".fxsaved").textContent = "";
+      saveFx(box);
+    });
     $("fixlist").onclick = async e => {
       const box = e.target.closest(".reply"); if (!box) return;
       const rid = box.dataset.rid, d = replies.get(rid), act = e.target.dataset.act;
@@ -1241,8 +1285,9 @@ self.onmessage = async e => {
       if (act !== "signoff") return;
       const items = [];
       for (const row of box.querySelectorAll(".fx")) {
-        const pick = row.querySelector("input[type=radio]:checked"); if (!pick) continue;
-        items.push({ n: +row.dataset.n, ok: pick.value === "1", text: (row.querySelector(".fxc").value || "").trim().slice(0, 2000) });
+        const pick = row.querySelector("input[type=radio]:checked"), text = (row.querySelector(".fxc").value || "").trim().slice(0, 2000);
+        if (!pick && !text) continue;
+        items.push({ n: +row.dataset.n, ok: pick ? pick.value === "1" : false, text });
       }
       const comment = (box.querySelector(".fxcomment").value || "").trim().slice(0, 2000);
       if (!items.length && !comment) { msg("Pick Looks good or Needs more work on at least one fix first."); return; }
@@ -1253,6 +1298,7 @@ self.onmessage = async e => {
         const name = `${DOCS}/signoffs/${rid}-${auth.uid.slice(0, 12)}-${Date.now().toString(36)}`;
         await api(`${FS}${DOCS}:commit`, { writes: [{ update: { name, fields: { uid: fs(auth.uid), who: fs(whoName()), vid: fs(VID), reply: fs(rid), items: fs(items), comment: fs(comment) } },
           updateTransforms: [{ fieldPath: "at", setToServerValue: "REQUEST_TIME" }], currentDocument: { exists: false } }] });
+        store.del("fxd:" + rid);
         store.set("signed:" + rid, new Date().toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }));
         renderFixes();
         msg(items.every(x => x.ok) && !comment ? "Sign-off sent: all good. Thanks!" : "Sign-off sent. The editor has your answers now.");
